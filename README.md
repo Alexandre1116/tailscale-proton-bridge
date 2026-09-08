@@ -70,7 +70,7 @@ Follow the prompts on your terminal. If you prefer manual setup, follow the guid
 ### Step 1: Clone Repository & Prepare Directories
 
 ```bash
-git clone https://github.com/<your-username>/tailscale-proton-bridge.git
+git clone https://github.com/Alexandre1116/tailscale-proton-bridge.git
 cd tailscale-proton-bridge
 ```
 
