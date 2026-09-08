@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}Configuração &mdash; Tailscale &harr; Proton VPN{% endblock %}
+{% block content %}
+
+<div class="panel">
+  <h2>Configuração</h2>
+  <p class="lede">Alterações aqui só atualizam ficheiros em disco. Depois de gravar, reinicie a ponte para as aplicar (ver nota em baixo).</p>
+
+  <form method="post" action="{{ url_for('save') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <fieldset>
+      <legend>Protocolo VPN</legend>
+      <div class="radio-group">
+        <label><input type="radio" name="vpn_type" value="auto" {% if vpn_type == 'auto' %}checked{% endif %}> Automático</label>
+        <label><input type="radio" name="vpn_type" value="wireguard" {% if vpn_type == 'wireguard' %}checked{% endif %}> WireGuard</label>
+        <label><input type="radio" name="vpn_type" value="openvpn" {% if vpn_type == 'openvpn' %}checked{% endif %}> OpenVPN</label>
+      </div>
+
+      <div class="vpn-block" data-vpn="wireguard">
+        <label>Ficheiro WireGuard (protonvpn.conf)</label>
+        <div class="dropzone">
+          <span class="dz-label">Arraste o ficheiro .conf para aqui, ou clique para escolher</span>
+          <input type="file" name="wg_conf" accept=".conf">
+        </div>
+        <div class="file-status {{ 'ok' if files_present.wireguard else 'missing' }}">
+          {{ 'protonvpn.conf presente.' if files_present.wireguard else 'Ainda sem ficheiro carregado.' }}
+        </div>
+      </div>
+
+      <div class="vpn-block" data-vpn="openvpn">
+        <label>Ficheiro OpenVPN (protonvpn.ovpn)</label>
+        <div class="dropzone">
+          <span class="dz-label">Arraste o ficheiro .ovpn para aqui, ou clique para escolher</span>
+          <input type="file" name="ovpn_conf" accept=".ovpn">
+        </div>
+        <div class="file-status {{ 'ok' if files_present.openvpn_conf else 'missing' }}">
+          {{ 'protonvpn.ovpn presente.' if files_present.openvpn_conf else 'Ainda sem ficheiro carregado.' }}
+        </div>
+
+        <label>Ficheiro de credenciais (credentials.txt, opcional)</label>
+        <div class="dropzone">
+          <span class="dz-label">Arraste o ficheiro .txt para aqui, ou clique para escolher</span>
+          <input type="file" name="ovpn_creds" accept=".txt">
+        </div>
+        <div class="file-status {{ 'ok' if files_present.openvpn_creds else 'missing' }}">
+          {{ 'credentials.txt presente.' if files_present.openvpn_creds else 'Sem ficheiro - preencha utilizador/palavra-passe abaixo.' }}
+        </div>
+
+        <label>Utilizador OpenVPN</label>
+        <input type="text" name="protonvpn_user" value="{{ env.PROTONVPN_USER }}" autocomplete="off">
+
+        <label>Palavra-passe OpenVPN
+          <span class="hint">{{ '(definida — deixe em branco para manter)' if secrets_set.PROTONVPN_PASSWORD else '' }}</span>
+        </label>
+        <input type="password" name="protonvpn_password" autocomplete="new-password" placeholder="{{ '••••••••' if secrets_set.PROTONVPN_PASSWORD else '' }}">
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Tailscale</legend>
+      <label>Nome do dispositivo (TS_HOSTNAME)</label>
+      <input type="text" name="ts_hostname" value="{{ env.TS_HOSTNAME }}" placeholder="protonvpn-bridge">
+
+      <label>Auth Key (TS_AUTHKEY)
+        <span class="hint">{{ '(definida — deixe em branco para manter)' if secrets_set.TS_AUTHKEY else '(em branco = ligação por link de login)' }}</span>
+      </label>
+      <input type="password" name="ts_authkey" autocomplete="new-password" placeholder="{{ 'tskey-auth-••••••••' if secrets_set.TS_AUTHKEY else 'tskey-auth-...' }}">
+
+      <label>Argumentos extra do 'tailscale up' (opcional)</label>
+      <input type="text" name="ts_extra_args" value="{{ env.TS_EXTRA_ARGS }}">
+    </fieldset>
+
+    <div class="actions">
+      <button type="submit" class="btn">Gravar configuração</button>
+      <a class="btn ghost" href="{{ url_for('wizard') }}">Executar assistente novamente</a>
+    </div>
+  </form>
+</div>
+
+<div class="panel">
+  <h2>Aplicar alterações</h2>
+  <p class="lede" style="margin-bottom:0">
+    Gravar aqui só atualiza o <code>.env</code> e a pasta <code>./vpn</code>. O container da
+    ponte só relê estes valores quando é recriado. Depois de gravar, execute no host:
+  </p>
+  <p style="font-family: var(--font-mono); font-size: 0.85rem; margin: 10px 0 0;">
+    docker compose up -d --build vpn-tailscale-bridge
+  </p>
+</div>
+
+{% endblock %}

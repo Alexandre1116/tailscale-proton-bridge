@@ -1,0 +1,17 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Ensure shell scripts always have LF line endings (required for Linux/Docker)
+*.sh text eol=lf
+
+# Python & config files
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+Dockerfile text eol=lf
+.env.example text eol=lf
+*.md text eol=lf

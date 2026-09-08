@@ -1,0 +1,35 @@
+# Environment & Secrets (NEVER COMMIT SENSITIVE DATA)
+.env
+.env.*
+!.env.example
+
+# VPN configuration files & credentials
+vpn/wireguard/*
+!vpn/wireguard/.gitkeep
+vpn/openvpn/*
+!vpn/openvpn/.gitkeep
+*.conf
+*.ovpn
+credentials.txt
+
+# Python & WebUI
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+ENV/
+
+# Runtime status and logs
+*.log
+status.json
+
+# IDEs & System files
+.vscode/
+.idea/
+.claude/
+.agents/
+.DS_Store
+Thumbs.db
+Desktop.ini

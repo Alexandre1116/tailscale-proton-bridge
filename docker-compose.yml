@@ -1,0 +1,80 @@
+services:
+  vpn-tailscale-bridge:
+    build: .
+    container_name: protonvpn-tailscale-bridge
+    restart: unless-stopped
+    # Privilégios mínimos necessários para criar túneis VPN, gerir tabelas de
+    # iptables e anunciar rotas, em vez de 'privileged: true' (que dá acesso
+    # total ao host). NET_ADMIN permite gerir interfaces/rotas/iptables;
+    # NET_RAW é necessário pelo OpenVPN e por algumas operações do iptables.
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      # Pré-definidos aqui como reforço; o entrypoint também os define via sysctl -w
+      - net.ipv4.ip_forward=1
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
+
+    volumes:
+      # Pastas onde colocará as configurações de VPN (.conf para WireGuard ou .ovpn/.txt para OpenVPN)
+      - ./vpn/wireguard:/etc/wireguard:ro
+      - ./vpn/openvpn:/etc/openvpn:ro
+      # Volume persistente para o estado do Tailscale
+      - tailscale-data:/var/lib/tailscale
+      # Ficheiro de estado partilhado, lido pela Web UI (protonvpn-tailscale-webui)
+      - bridge-status:/var/run/bridge-status
+
+    environment:
+      # Modo de funcionamento: wireguard | openvpn | auto (detecta o ficheiro presente)
+      - VPN_TYPE=${VPN_TYPE:-auto}
+      # Chave de autenticação gerada na consola do Tailscale (tskey-auth-...)
+      - TS_AUTHKEY=${TS_AUTHKEY}
+      # Nome do dispositivo que aparecerá na sua Tailnet
+      - TS_HOSTNAME=${TS_HOSTNAME:-protonvpn-bridge}
+      # Credenciais OpenVPN (caso utilize OpenVPN sem ficheiro credentials.txt)
+      - PROTONVPN_USER=${PROTONVPN_USER}
+      - PROTONVPN_PASSWORD=${PROTONVPN_PASSWORD}
+      # Argumentos adicionais opcionais para o comando 'tailscale up'
+      - TS_EXTRA_ARGS=${TS_EXTRA_ARGS:-}
+
+    healthcheck:
+      test: ["CMD-SHELL", "tailscale status >/dev/null 2>&1 && grep -q '\"connected\": true' /var/run/bridge-status/status.json 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 25s
+
+  webui:
+    build: ./webui
+    container_name: protonvpn-tailscale-webui
+    restart: unless-stopped
+    ports:
+      - "${WEBUI_PORT:-8080}:8080"
+    volumes:
+      # Acesso de leitura/escrita às pastas de configuração da VPN, para permitir
+      # o upload dos ficheiros .conf/.ovpn/credentials.txt a partir da Web UI
+      - ./vpn/wireguard:/data/vpn/wireguard
+      - ./vpn/openvpn:/data/vpn/openvpn
+      # O próprio ficheiro .env do projeto, para a Web UI poder ler/gravar as variáveis
+      - ./.env:/data/.env
+      # Estado do bridge, apenas em leitura
+      - bridge-status:/var/run/bridge-status:ro
+    environment:
+      - WEBUI_USERNAME=${WEBUI_USERNAME:-admin}
+      - WEBUI_PASSWORD=${WEBUI_PASSWORD:-}
+
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\")' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  tailscale-data:
+    name: tailscale-bridge-data
+  bridge-status:
+    name: tailscale-bridge-status

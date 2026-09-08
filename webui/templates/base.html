@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Ponte Tailscale &harr; Proton VPN{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="brand">
+      <svg class="brand-mark" viewBox="0 0 34 34" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="1" y="1" width="32" height="32" fill="none" stroke="var(--blue-line)"/>
+        <path d="M6 24 H14 V10 H28" fill="none" stroke="var(--ink-dim)" stroke-width="1.6"/>
+        <circle cx="6" cy="24" r="2.4" fill="var(--ink-dim)"/>
+        <circle cx="28" cy="10" r="2.4" fill="var(--signal)"/>
+      </svg>
+      <div class="brand-text">
+        <h1>Tailscale &harr; Proton VPN</h1>
+        <p>PONTE / EXIT NODE</p>
+      </div>
+    </div>
+
+    <div class="title-block">
+      <dl>
+        <dt>Protocolo</dt>
+        <dd id="tb-proto">{{ (vpn_type or '-')|upper }}</dd>
+      </dl>
+      <dl>
+        <dt>Estado</dt>
+        <dd id="tb-state" class="state-off">A verificar</dd>
+      </dl>
+    </div>
+  </div>
+
+  <div class="schematic-panel" id="schematic-panel" data-status-url="{{ url_for('api_status') }}">
+    <svg class="schematic" viewBox="0 0 660 130" xmlns="http://www.w3.org/2000/svg" role="img"
+         aria-label="Diagrama do percurso do tráfego: Tailnet, Ponte, Proton VPN, Internet">
+      <path class="wire" d="M100,60 H260" />
+      <path class="wire" d="M380,60 H540" />
+      <path class="wire" d="M620,60 H645" stroke-dasharray="3 4" />
+
+      <circle class="pad" cx="100" cy="60" r="3"/>
+      <circle class="pad" cx="260" cy="60" r="3"/>
+      <circle class="pad" cx="380" cy="60" r="3"/>
+      <circle class="pad" cx="540" cy="60" r="3"/>
+
+      <rect class="node-box" x="40" y="42" width="60" height="36" />
+      <text class="node-label" x="70" y="95">TAILNET</text>
+
+      <rect class="node-box self" x="260" y="30" width="120" height="60" />
+      <text class="node-label" x="320" y="55">ESTA PONTE</text>
+      <text class="node-sub" x="320" y="70">{{ ts_hostname or 'protonvpn-bridge' }}</text>
+      <text class="node-sub ip" id="node-ip" x="320" y="82">sem ligação</text>
+
+      <rect class="node-box" x="540" y="42" width="80" height="36" />
+      <text class="node-label" x="580" y="95">PROTON VPN</text>
+
+      <text class="node-sub" x="655" y="95" text-anchor="end">NET</text>
+
+      <circle class="signal-dot" cy="60" r="4" />
+    </svg>
+    <div class="status-line">
+      <span id="status-detail-text">A verificar estado&hellip;</span>
+    </div>
+  </div>
+
+  <div class="action-strip" id="action-strip">
+    <span class="dot" aria-hidden="true"></span>
+    <p>É necessário aprovar este dispositivo na sua conta Tailscale para concluir a ligação.</p>
+    <a class="btn" id="action-strip-link" href="#" target="_blank" rel="noopener">Abrir link de autenticação</a>
+  </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {%- if messages %}
+      {%- for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+      {%- endfor %}
+    {%- endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+
+  <footer class="page-footer">Tailscale &harr; Proton VPN &mdash; ponte de exit node self-hosted</footer>
+</div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

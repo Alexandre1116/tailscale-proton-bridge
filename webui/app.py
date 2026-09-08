@@ -1,0 +1,303 @@
+#!/usr/bin/env python3
+"""Web UI de configuração para o Tailscale <-> Proton VPN Bridge.
+
+Permite configurar o ficheiro .env do projeto e carregar os ficheiros de
+configuração da VPN (WireGuard/OpenVPN) sem precisar de aceder ao host por
+SSH. Não controla o container do bridge diretamente (não tem acesso ao
+socket do Docker) por razões de segurança - depois de gravar alterações,
+o utilizador deve reiniciar o container manualmente.
+"""
+import hmac
+import json
+import os
+import re
+import secrets
+from functools import wraps
+
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
+
+app = Flask(__name__)
+app.secret_key = secrets.token_hex(32)
+app.config["MAX_CONTENT_LENGTH"] = 1 * 1024 * 1024  # 1 MB é mais do que suficiente para .conf/.ovpn
+
+ENV_PATH = os.environ.get("ENV_PATH", "/data/.env")
+VPN_DIR = os.environ.get("VPN_DIR", "/data/vpn")
+WG_DIR = os.path.join(VPN_DIR, "wireguard")
+OVPN_DIR = os.path.join(VPN_DIR, "openvpn")
+STATUS_FILE = os.environ.get("STATUS_FILE", "/var/run/bridge-status/status.json")
+
+WEBUI_USERNAME = os.environ.get("WEBUI_USERNAME", "admin")
+WEBUI_PASSWORD = os.environ.get("WEBUI_PASSWORD", "")
+if not WEBUI_PASSWORD:
+    WEBUI_PASSWORD = secrets.token_urlsafe(12)
+    print("=" * 70)
+    print("AVISO: WEBUI_PASSWORD não foi definida no .env.")
+    print(f"Foi gerada uma palavra-passe temporária para esta sessão: {WEBUI_PASSWORD}")
+    print(f"Utilizador: {WEBUI_USERNAME}")
+    print("Esta palavra-passe muda a cada reinício do container. Defina")
+    print("WEBUI_USERNAME e WEBUI_PASSWORD no .env para um valor fixo.")
+    print("=" * 70, flush=True)
+
+SECRET_ENV_KEYS = {"TS_AUTHKEY", "PROTONVPN_PASSWORD", "WEBUI_PASSWORD"}
+ENV_FIELDS = [
+    "VPN_TYPE",
+    "TS_AUTHKEY",
+    "TS_HOSTNAME",
+    "TS_EXTRA_ARGS",
+    "PROTONVPN_USER",
+    "PROTONVPN_PASSWORD",
+    "WEBUI_USERNAME",
+    "WEBUI_PASSWORD",
+    "WEBUI_PORT",
+    "SETUP_COMPLETE",
+]
+
+HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
+
+
+def require_auth(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        auth = request.authorization
+        valid = (
+            auth is not None
+            and hmac.compare_digest(auth.username or "", WEBUI_USERNAME)
+            and hmac.compare_digest(auth.password or "", WEBUI_PASSWORD)
+        )
+        if not valid:
+            return (
+                "Autenticação necessária.",
+                401,
+                {"WWW-Authenticate": 'Basic realm="Tailscale ProtonVPN Bridge"'},
+            )
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def load_env():
+    values = {}
+    if os.path.isdir(ENV_PATH):
+        print(
+            f"AVISO: {ENV_PATH} é um diretório. Crie o ficheiro .env no host antes de montar.",
+            flush=True,
+        )
+        return values
+    if os.path.isfile(ENV_PATH):
+        with open(ENV_PATH, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                values[key.strip()] = value.strip()
+    return values
+
+
+def save_env(updates):
+    """Atualiza (ou adiciona) as chaves indicadas em updates no ficheiro .env,
+    preservando comentários e restantes linhas."""
+    if os.path.isdir(ENV_PATH):
+        raise RuntimeError(
+            f"{ENV_PATH} é um diretório no container. Certifique-se de que o ficheiro .env existe no host."
+        )
+
+    lines = []
+    if os.path.isfile(ENV_PATH):
+        with open(ENV_PATH, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+    seen = set()
+    new_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and "=" in stripped:
+            key = stripped.split("=", 1)[0].strip()
+            if key in updates:
+                new_lines.append(f"{key}={updates[key]}\n")
+                seen.add(key)
+                continue
+        new_lines.append(line)
+
+    for key, value in updates.items():
+        if key not in seen:
+            new_lines.append(f"{key}={value}\n")
+
+    with open(ENV_PATH, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
+
+
+def read_status():
+    default = {
+        "vpn_mode": None,
+        "vpn_interface": None,
+        "connected": False,
+        "tailscale_ip": "",
+        "hostname": "",
+        "auth_url": "",
+        "last_updated": None,
+    }
+    if not os.path.isfile(STATUS_FILE):
+        return default
+    try:
+        with open(STATUS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            default.update(data)
+            return default
+    except (json.JSONDecodeError, OSError):
+        default["error"] = "não foi possível ler o estado"
+        return default
+
+
+def save_upload(file_storage, dest_dir, dest_name):
+    os.makedirs(dest_dir, exist_ok=True)
+    # Ignoramos por completo o nome original do ficheiro (evita path traversal);
+    # usamos sempre o nome fixo esperado pelo entrypoint.sh.
+    dest_path = os.path.join(dest_dir, dest_name)
+    file_storage.save(dest_path)
+    try:
+        os.chmod(dest_path, 0o600)
+    except OSError:
+        pass
+
+
+def files_present_state():
+    return {
+        "wireguard": os.path.isfile(os.path.join(WG_DIR, "protonvpn.conf")),
+        "openvpn_conf": os.path.isfile(os.path.join(OVPN_DIR, "protonvpn.ovpn")),
+        "openvpn_creds": os.path.isfile(os.path.join(OVPN_DIR, "credentials.txt")),
+    }
+
+
+def build_context(env_values, files_present):
+    csrf_token = secrets.token_hex(16)
+    session["csrf"] = csrf_token
+
+    display_values = {}
+    for key in ENV_FIELDS:
+        if key in SECRET_ENV_KEYS:
+            display_values[key] = ""  # nunca reenviar segredos para o browser
+        else:
+            display_values[key] = env_values.get(key, "")
+
+    secrets_set = {key: bool(env_values.get(key)) for key in SECRET_ENV_KEYS}
+
+    return {
+        "env": display_values,
+        "secrets_set": secrets_set,
+        "files_present": files_present,
+        "csrf_token": csrf_token,
+        "vpn_type": env_values.get("VPN_TYPE", "auto"),
+        "ts_hostname": env_values.get("TS_HOSTNAME", ""),
+    }
+
+
+def is_first_run(env_values, files_present):
+    if env_values.get("SETUP_COMPLETE") == "1":
+        return False
+    has_vpn_config = files_present["wireguard"] or files_present["openvpn_conf"]
+    has_tailscale_setup = bool(env_values.get("TS_AUTHKEY"))
+    return not (has_vpn_config or has_tailscale_setup)
+
+
+@app.route("/healthz", methods=["GET"])
+def healthz():
+    """Endpoint de verificação de integridade (Health Check) unauthenticated."""
+    return jsonify({"status": "healthy"}), 200
+
+
+@app.route("/", methods=["GET"])
+@require_auth
+def index():
+    env_values = load_env()
+    files_present = files_present_state()
+
+    if is_first_run(env_values, files_present) and not request.args.get("skip_wizard"):
+        return redirect(url_for("wizard"))
+
+    return render_template("index.html", **build_context(env_values, files_present))
+
+
+@app.route("/wizard", methods=["GET"])
+@require_auth
+def wizard():
+    env_values = load_env()
+    files_present = files_present_state()
+    return render_template("wizard.html", **build_context(env_values, files_present))
+
+
+@app.route("/save", methods=["POST"])
+@require_auth
+def save():
+    is_wizard = request.form.get("setup_complete") == "1"
+    error_target = "wizard" if is_wizard else "index"
+
+    token = request.form.get("csrf_token", "")
+    if not token or not hmac.compare_digest(token, session.get("csrf", "")):
+        abort(400, "Token CSRF inválido. Recarregue a página e tente novamente.")
+
+    vpn_type = request.form.get("vpn_type", "auto").strip().lower()
+    if vpn_type not in ("auto", "wireguard", "openvpn"):
+        vpn_type = "auto"
+
+    ts_hostname = request.form.get("ts_hostname", "").strip() or "protonvpn-bridge"
+    if not HOSTNAME_RE.match(ts_hostname):
+        flash("Nome de dispositivo (TS_HOSTNAME) inválido - use apenas letras, números e hífens.", "error")
+        return redirect(url_for(error_target))
+
+    updates = {
+        "VPN_TYPE": vpn_type,
+        "TS_HOSTNAME": ts_hostname,
+        "TS_EXTRA_ARGS": request.form.get("ts_extra_args", "").strip(),
+        "PROTONVPN_USER": request.form.get("protonvpn_user", "").strip(),
+    }
+
+    if is_wizard:
+        updates["SETUP_COMPLETE"] = "1"
+
+    # Campos sensíveis: só substituímos o valor gravado se o utilizador escreveu algo novo.
+    ts_authkey = request.form.get("ts_authkey", "").strip()
+    if ts_authkey:
+        updates["TS_AUTHKEY"] = ts_authkey
+
+    protonvpn_password = request.form.get("protonvpn_password", "").strip()
+    if protonvpn_password:
+        updates["PROTONVPN_PASSWORD"] = protonvpn_password
+
+    # Uploads de ficheiros de configuração
+    wg_conf = request.files.get("wg_conf")
+    if wg_conf and wg_conf.filename:
+        save_upload(wg_conf, WG_DIR, "protonvpn.conf")
+        flash("Ficheiro WireGuard (protonvpn.conf) carregado.", "success")
+
+    ovpn_conf = request.files.get("ovpn_conf")
+    if ovpn_conf and ovpn_conf.filename:
+        save_upload(ovpn_conf, OVPN_DIR, "protonvpn.ovpn")
+        flash("Ficheiro OpenVPN (protonvpn.ovpn) carregado.", "success")
+
+    ovpn_creds = request.files.get("ovpn_creds")
+    if ovpn_creds and ovpn_creds.filename:
+        save_upload(ovpn_creds, OVPN_DIR, "credentials.txt")
+        flash("Ficheiro de credenciais OpenVPN carregado.", "success")
+
+    save_env(updates)
+    if is_wizard:
+        flash("Configuração inicial concluída. Arranque o container com "
+              "'docker compose up -d --build' para aplicar.", "success")
+    else:
+        flash("Configuração gravada. Reinicie o container do bridge para aplicar as alterações "
+              "(docker compose up -d --build vpn-tailscale-bridge).", "success")
+    return redirect(url_for("index", skip_wizard=1))
+
+
+@app.route("/api/status", methods=["GET"])
+@require_auth
+def api_status():
+    return jsonify(read_status())
+
+
+if __name__ == "__main__":
+    port = int(os.environ.get("WEBUI_INTERNAL_PORT", "8080"))
+    from waitress import serve
+
+    serve(app, host="0.0.0.0", port=port)
