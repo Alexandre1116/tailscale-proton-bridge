@@ -16,7 +16,7 @@ RESET = "\033[0m"
 def print_banner():
     banner = f"""
 {BLUE}{BOLD}===================================================================
-     Tailscale - Proton VPN Bridge Exit Node Setup CLI 🌐🛡️
+     Tailscale - Proton VPN Bridge Exit Node Setup CLI
 ==================================================================={RESET}
 Este script irá guiá-lo na configuração da ponte para que o seu
 tráfego Tailscale seja encaminhado de forma segura pelo Proton VPN.
@@ -28,14 +28,14 @@ def create_directories():
     os.makedirs(os.path.join("vpn", "wireguard"), exist_ok=True)
     os.makedirs(os.path.join("vpn", "openvpn"), exist_ok=True)
     os.makedirs("secrets", exist_ok=True)
-    print(f"{GREEN}✓ Pastas './vpn/wireguard' e './vpn/openvpn' criadas.{RESET}")
+    print(f"{GREEN}Pastas './vpn/wireguard' e './vpn/openvpn' criadas.{RESET}")
     
     # Garantir que o ficheiro .env existe antes do Docker Compose para evitar que seja montado como diretório
     env_created = False
     if not os.path.exists(".env") and os.path.exists(".env.example"):
         shutil.copyfile(".env.example", ".env")
         env_created = True
-        print(f"{GREEN}✓ Ficheiro base '.env' criado a partir de '.env.example'.{RESET}")
+        print(f"{GREEN}Ficheiro base '.env' criado a partir de '.env.example'.{RESET}")
     print("")
     return env_created
 
@@ -71,7 +71,7 @@ def main():
             vpn_choice = "1"
 
     vpn_type = "wireguard" if vpn_choice == "1" else "openvpn"
-    print(f"{GREEN}✓ Protocolo escolhido: {vpn_type.upper()}{RESET}\n")
+    print(f"{GREEN}Protocolo escolhido: {vpn_type.upper()}{RESET}\n")
 
     # 2. Configurações da VPN
     proton_user = ""
@@ -99,16 +99,16 @@ def main():
 
     # Verificar se o ficheiro de configuração foi colocado
     if not os.path.isfile(config_path):
-        print(f"\n{YELLOW}⚠️  Aviso: Não encontrei o ficheiro de configuração em: {config_path}{RESET}")
+        print(f"\n{YELLOW}Aviso: Não encontrei o ficheiro de configuração em: {config_path}{RESET}")
         create_empty = input(f"{BLUE}Deseja criar um ficheiro vazio temporário para avançar o setup? (s/N): {RESET}").strip().lower()
         if create_empty == "s":
             with open(config_path, "w") as f:
                 f.write("# Substitua este conteúdo pelo ficheiro real da Proton VPN")
-            print(f"{GREEN}✓ Ficheiro vazio temporário criado em: {config_path}{RESET}")
+            print(f"{GREEN}Ficheiro vazio temporário criado em: {config_path}{RESET}")
         else:
             print(f"{RED}Por favor, coloque o ficheiro real na pasta antes de iniciar o container.{RESET}")
     else:
-        print(f"{GREEN}✓ Ficheiro de configuração VPN detectado!{RESET}")
+        print(f"{GREEN}Ficheiro de configuração VPN detectado.{RESET}")
 
     print("")
 
@@ -122,7 +122,7 @@ def main():
     if ts_hostname == "":
         ts_hostname = "protonvpn-bridge"
 
-    print(f"{GREEN}✓ Configurações do Tailscale registadas.{RESET}\n")
+    print(f"{GREEN}Configurações do Tailscale registadas.{RESET}\n")
 
     # 4. Configurar e proteger a Web UI
     print(f"{BOLD}Passo 4: Configurar a Web UI{RESET}")
@@ -197,7 +197,7 @@ VPN_HEALTHCHECK_URL=https://api.ipify.org
         os.chmod(".env", 0o600)
     except OSError:
         pass
-    print(f"{GREEN}✓ Ficheiro '.env' atualizado com sucesso!{RESET}\n")
+    print(f"{GREEN}Ficheiro '.env' atualizado com sucesso.{RESET}\n")
 
     # 5. Perguntar se quer rodar o container agora
     print(f"{BOLD}Passo 6: Inicialização do Docker{RESET}")
@@ -205,10 +205,10 @@ VPN_HEALTHCHECK_URL=https://api.ipify.org
     compose_installed = check_command("docker-compose") or (docker_installed and subprocess.run(["docker", "compose", "version"], capture_output=True).returncode == 0)
 
     if not docker_installed:
-        print(f"{RED}❌ Docker não detectado no sistema. Por favor, instale o Docker para poder correr este projeto.{RESET}")
+        print(f"{RED}Docker não detectado no sistema. Instale o Docker para correr este projeto.{RESET}")
         sys.exit(0)
     
-    print(f"{GREEN}✓ Docker detectado.{RESET}")
+    print(f"{GREEN}Docker detectado.{RESET}")
     
     run_now = input(f"\n{BLUE}Deseja construir e iniciar o container Docker agora? (s/N): {RESET}").strip().lower()
     if run_now == "s":
@@ -221,7 +221,7 @@ VPN_HEALTHCHECK_URL=https://api.ipify.org
                 subprocess.run(["docker-compose", "up", "-d", "--build"], check=True)
             
             print(f"\n{GREEN}==================================================================={RESET}")
-            print(f"{GREEN}{BOLD}✓ O container foi iniciado com sucesso!{RESET}")
+            print(f"{GREEN}{BOLD}O container foi iniciado com sucesso.{RESET}")
             print(f"Para ver os logs do container, execute: {BOLD}docker compose logs -f{RESET}")
             print(f"Lembre-se de ir ao painel da Tailscale para {BOLD}aprovar o Exit Node{RESET}!")
             print(f"{GREEN}==================================================================={RESET}")

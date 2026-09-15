@@ -8,6 +8,8 @@
 [![Proton VPN](https://img.shields.io/badge/Proton_VPN-WireGuard_%2F_OpenVPN-purple?logo=protonvpn)](https://protonvpn.com)
 [![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-brightgreen)](#)
 
+Current prerelease: `v0.1.0-beta.2`
+
 Route all your private Tailscale network traffic through **Proton VPN** (including the **100% Free tier**) via a lightweight Docker exit node.
 
 Whenever any device on your Tailnet (smartphone, laptop, tablet) connects to this Exit Node, its internet traffic is routed through Proton VPN servers.
@@ -42,6 +44,10 @@ graph LR
 - **Interactive Setup CLI**: Guided terminal wizard (`python setup.py`) to configure your environment in seconds.
 - **Multi-Architecture**: Out-of-the-box support for `amd64` (x86_64 PCs & servers) and `arm64` (Raspberry Pi 4/5, Synology NAS, Apple Silicon).
 - **Native Healthchecks**: Docker health checks monitoring Tailscale daemon and VPN interface connectivity.
+
+This beta is intended for validation on the compatibility targets below. Test
+the VPN-down fail-closed behaviour before using the bridge for production
+traffic.
 
 ---
 
@@ -111,10 +117,10 @@ cp .env.example .env
 ```
 
 Edit `.env` with your settings:
-- **`TS_AUTHKEY`**: Generated in Tailscale Admin Console (**Settings -> Keys -> Generate Auth Key**). Enable *Reusable*. (Optional: leave blank to authenticate via web login URL).
+- **`TS_AUTHKEY`**: Generated in Tailscale Admin Console (**Settings -> Keys -> Generate Auth Key**). For a long-lived bridge, use a reusable, pre-authorized key. Leave blank to authenticate via the login URL shown in the logs and Web UI.
 - **`VPN_TYPE`**: `wireguard`, `openvpn`, or `auto` (auto-detects configuration file).
 - **`TS_HOSTNAME`**: Name for your device on your Tailnet (default: `protonvpn-bridge`).
-- (Optional) **`WEBUI_USERNAME`** & **`WEBUI_PASSWORD`**: Fixed credentials for the Web UI.
+- **`WEBUI_USERNAME`** & **`WEBUI_PASSWORD`**: Required credentials for the Web UI. The Web UI refuses to start with an empty password.
 
 ---
 
@@ -146,7 +152,8 @@ Your Proton VPN Exit Node is now live!
 
 ## Web UI Dashboard
 
-A lightweight web dashboard is available at `http://<host-ip>:8080`:
+A lightweight web dashboard is available at the configured bind address and
+port, for example `http://<host-ip>:8080`:
 
 1. **Authentication**: Uses HTTP Basic Auth (`WEBUI_USERNAME` and `WEBUI_PASSWORD`). `WEBUI_PASSWORD` must be set before starting the Web UI.
 2. **First Run Wizard**: Automatically launches a 4-step wizard with drag-and-drop file upload for `.conf` or `.ovpn` files.
@@ -154,6 +161,11 @@ A lightweight web dashboard is available at `http://<host-ip>:8080`:
 4. **Apply Changes**: Because the Web UI does not access the Docker socket for security reasons, apply saved modifications with:
    ```bash
    docker compose up -d --build vpn-tailscale-bridge
+   ```
+   If you changed Web UI settings such as the protocol, bind address or
+   password source, recreate the Web UI instead:
+   ```bash
+   docker compose up -d --build webui
    ```
 
 ---
@@ -204,7 +216,8 @@ WEBUI_ACCESS_MODE=tailnet
 WEBUI_BIND_ADDRESS=100.101.102.103
 ```
 
-For credentials, create root-only files under `secrets/` and use the file
+For bridge credentials, create files under `secrets/` with permissions that
+allow only the container user that needs them to read them, and use the file
 variables instead of putting values in `.env`:
 
 ```dotenv
@@ -213,6 +226,10 @@ PROTONVPN_USER_FILE=/run/secrets/protonvpn_user
 PROTONVPN_PASSWORD_FILE=/run/secrets/protonvpn_password
 WEBUI_PASSWORD_FILE=/run/secrets/webui_password
 ```
+
+The bridge runs as root inside its container and can read its mounted secret
+files. The Web UI runs as UID 1000, so `webui_password` must be readable by
+that UID. Never commit the `secrets/` directory contents.
 
 The `tailnet` mode also allows the usual Tailscale IPv4 and IPv6 ranges. Binding
 to a specific Tailscale IP is the stronger restriction. The Web UI writes VPN
@@ -223,7 +240,7 @@ credentials and `.env`, so do not publish this port directly to the Internet.
 | Platform | Status | Notes |
 |---|---|---|
 | Debian/Ubuntu Linux with Docker Engine | Supported | Requires `/dev/net/tun`, IPv4 forwarding, and network permissions. |
-| Synology DSM 7.x with Container Manager | Supported with validation | Confirm `/dev/net/tun`, `iptables-legacy`, and the NAS architecture. |
+| Synology DSM 7.x with Container Manager | Supported with validation | Confirm `/dev/net/tun`, the available iptables backend, and the NAS architecture. |
 | Raspberry Pi 4/5, 64-bit Raspberry Pi OS | Supported | CI covers `arm64`; test OpenVPN performance on the target model. |
 | Docker Desktop on Windows/macOS | Bridge not supported | The UI may build, but the exit node needs the TUN device and Linux host networking. |
 

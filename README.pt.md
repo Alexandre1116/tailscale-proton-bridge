@@ -8,9 +8,15 @@
 [![Proton VPN](https://img.shields.io/badge/Proton_VPN-WireGuard_%2F_OpenVPN-purple?logo=protonvpn)](https://protonvpn.com)
 [![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-brightgreen)](#)
 
+Pré-release atual: `v0.1.0-beta.2`
+
 Este projeto permite criar um container Docker que funciona como uma ponte (bridge) entre o **Proton VPN** (incluindo o plano **Free/Gratuito**) e a sua rede privada **Tailscale (Tailnet)**, atuando como um **Exit Node** (Nó de Saída). 
 
 Quando se liga a este Exit Node através de qualquer dispositivo da sua Tailnet (telemóvel, portátil, etc.), todo o seu tráfego de internet será encriptado e encaminhado através dos servidores da Proton VPN.
+
+Esta versão beta destina-se à validação nas plataformas indicadas na matriz
+abaixo. Teste o bloqueio de tráfego quando a VPN cai antes de usar a bridge
+com tráfego de produção.
 
 ```mermaid
 graph LR
@@ -93,10 +99,11 @@ Pode optar por uma das duas vias (a Proton VPN suporta ambas no plano gratuito):
    cp .env.example .env
    ```
 2. Abra o `.env` e preencha as variáveis:
-   * **`TS_AUTHKEY`**: Obtenha na consola do Tailscale em **Settings -> Keys -> Generate Auth Key**. Ative a opção *Reusable* (Reutilizável) para que o container possa restabelecer a conexão automaticamente. Se deixar em branco, pode aprovar via Web UI ou logs.
+   * **`TS_AUTHKEY`**: Obtenha na consola do Tailscale em **Settings -> Keys -> Generate Auth Key**. Para uma bridge de longa duração, use uma chave reutilizável e pré-autorizada. Se deixar em branco, autentique através do link apresentado nos logs e na Web UI.
    * **`VPN_TYPE`**: Defina como `wireguard` ou `openvpn` (ou deixe `auto` para deteção automática do ficheiro presente).
    * **`TS_HOSTNAME`**: O nome que deseja dar a este Exit Node na sua consola Tailscale (ex: `protonvpn-bridge`).
    * (Apenas para OpenVPN se não usar `credentials.txt`): Insira o `PROTONVPN_USER` e `PROTONVPN_PASSWORD`.
+   * **`WEBUI_USERNAME`** e **`WEBUI_PASSWORD`**: Credenciais obrigatórias da Web UI. A Web UI não inicia com a password vazia.
 
 ---
 
@@ -139,6 +146,11 @@ Além do terminal, o projeto inclui uma interface web intuitiva para gerir a bri
 5. **Aplicação de Alterações**: Por segurança (para não expor o socket do Docker à Web UI), após gravar alterações no painel basta correr:
    ```bash
    docker compose up -d --build vpn-tailscale-bridge
+   ```
+   Se alterou o protocolo, o bind address ou a origem da password da Web UI,
+   recrie a Web UI:
+   ```bash
+   docker compose up -d --build webui
    ```
 
 ---
@@ -192,8 +204,9 @@ WEBUI_ACCESS_MODE=tailnet
 WEBUI_BIND_ADDRESS=100.101.102.103
 ```
 
-Para as credenciais, crie ficheiros com permissões apenas para o administrador
-em `secrets/` e use estas variáveis em vez de guardar os valores no `.env`:
+Para as credenciais do bridge, crie ficheiros em `secrets/` com permissões que
+permitam a leitura apenas ao utilizador do container que precisa delas, e use
+estas variáveis em vez de guardar os valores no `.env`:
 
 ```dotenv
 TS_AUTHKEY_FILE=/run/secrets/ts_authkey
@@ -201,6 +214,10 @@ PROTONVPN_USER_FILE=/run/secrets/protonvpn_user
 PROTONVPN_PASSWORD_FILE=/run/secrets/protonvpn_password
 WEBUI_PASSWORD_FILE=/run/secrets/webui_password
 ```
+
+O bridge corre como root dentro do container e consegue ler os seus secrets.
+A Web UI corre com UID 1000, por isso `webui_password` tem de ser legível por
+esse UID. Nunca faça commit do conteúdo de `secrets/`.
 
 O modo `tailnet` também aceita por defeito as redes Tailscale IPv4 e IPv6. A
 restrição mais forte é o bind a um IP Tailscale específico. A Web UI escreve
@@ -211,7 +228,7 @@ credenciais no `.env`, por isso não publique esta porta diretamente na Internet
 | Plataforma | Estado | Notas |
 |---|---|---|
 | Debian/Ubuntu Linux com Docker Engine | Suportada | Requer `/dev/net/tun`, forwarding IPv4 e permissões de rede. |
-| Synology DSM 7.x com Container Manager | Suportada com validação | Confirmar `/dev/net/tun`, backend `iptables-legacy` e arquitetura do NAS. |
+| Synology DSM 7.x com Container Manager | Suportada com validação | Confirmar `/dev/net/tun`, o backend iptables disponível e a arquitetura do NAS. |
 | Raspberry Pi 4/5, Raspberry Pi OS 64-bit | Suportada | A imagem CI cobre `arm64`; testar o desempenho do OpenVPN no modelo usado. |
 | Docker Desktop em Windows/macOS | Não suportada para o bridge | A UI pode ser construída, mas o exit node requer o dispositivo TUN e rede Linux no anfitrião. |
 
