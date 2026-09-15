@@ -38,10 +38,10 @@ STATUS_DIR="/var/run/bridge-status"
 STATUS_FILE="$STATUS_DIR/status.json"
 mkdir -p "$STATUS_DIR"
 read_secret_file() {
-    [ -n "${1:-}" ] && [ -r "$1" ] || {
+    if [ -z "${1:-}" ] || [ ! -r "$1" ]; then
         echo "Erro: secret file ausente ou ilegível: ${1:-}" >&2
         exit 1
-    }
+    fi
     tr -d '\r\n' < "$1"
 }
 
