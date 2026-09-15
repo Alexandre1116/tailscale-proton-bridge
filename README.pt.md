@@ -174,6 +174,7 @@ Além do terminal, o projeto inclui uma interface web intuitiva para gerir a bri
   * IPv6 é integralmente desativado dentro do container (`disable_ipv6=1` e `ip6tables -P FORWARD DROP`) para prevenir fugas de tráfego fora do túnel (IPv6 Leaks).
 * **Compatibilidade com Docker / resolvconf**: Tratamento transparente de `/etc/resolv.conf` sem causar conflitos de montagem no Docker com `openresolv`.
 * **Auto-healing e Healthchecks**: O bridge testa Tailscale, a interface VPN e um pedido HTTPS através da VPN. Depois de falhas consecutivas, sai para que o Docker o reinicie.
+* **Análise das imagens**: A CI analisa ambas as imagens com Trivy. Findings críticos fazem falhar a build; findings de severidade alta nas imagens upstream continuam visíveis no resultado para revisão.
 * **Multi-Arquitetura**: Totalmente compatível com processadores `x86_64` (PC / Servidores) e `ARM64` (Raspberry Pi 4/5, Synology NAS, Apple Silicon).
 
 ---

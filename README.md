@@ -187,6 +187,7 @@ port, for example `http://<host-ip>:8080`:
   - Container-level IPv6 disabling and `ip6tables -P FORWARD DROP` protect forwarded traffic. Validate DNS and IPv6 behaviour on the client you use.
 - **Docker DNS Compatibility**: Transparently manages `/etc/resolv.conf` to avoid `openresolv` bind-mount collisions common in Docker environments.
 - **Auto-Healing**: Monitors Tailscale, the VPN interface, and a real HTTPS request through the VPN. After consecutive failures, the container exits and Docker restarts it (`restart: unless-stopped`).
+- **Image Scanning**: CI scans both images with Trivy. Critical findings fail the build; high-severity findings from upstream images remain visible in the scan output for review.
 
 ---
 

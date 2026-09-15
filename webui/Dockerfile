@@ -1,5 +1,5 @@
 # Imagem leve para a Web UI de configuração do bridge
-FROM python:3.12-alpine
+FROM python:3.12.14-alpine3.23
 
 WORKDIR /app
 

@@ -3,7 +3,7 @@ ARG TAILSCALE_VERSION=1.102.3
 FROM tailscale/tailscale:v${TAILSCALE_VERSION} AS tailscale
 
 # Use Alpine Linux para a imagem final (leve e segura)
-FROM alpine:3.22
+FROM alpine:3.23.5
 
 # Instalar dependências necessárias para OpenVPN, WireGuard e rede
 RUN apk add --no-cache \
