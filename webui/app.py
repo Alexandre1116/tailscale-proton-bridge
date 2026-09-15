@@ -12,6 +12,8 @@ import json
 import os
 import re
 import secrets
+import ipaddress
+import tempfile
 from functools import wraps
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
@@ -28,15 +30,46 @@ STATUS_FILE = os.environ.get("STATUS_FILE", "/var/run/bridge-status/status.json"
 
 WEBUI_USERNAME = os.environ.get("WEBUI_USERNAME", "admin")
 WEBUI_PASSWORD = os.environ.get("WEBUI_PASSWORD", "")
-if not WEBUI_PASSWORD:
-    WEBUI_PASSWORD = secrets.token_urlsafe(12)
-    print("=" * 70)
-    print("AVISO: WEBUI_PASSWORD não foi definida no .env.")
-    print(f"Foi gerada uma palavra-passe temporária para esta sessão: {WEBUI_PASSWORD}")
-    print(f"Utilizador: {WEBUI_USERNAME}")
-    print("Esta palavra-passe muda a cada reinício do container. Defina")
-    print("WEBUI_USERNAME e WEBUI_PASSWORD no .env para um valor fixo.")
-    print("=" * 70, flush=True)
+WEBUI_PASSWORD_FILE = os.environ.get("WEBUI_PASSWORD_FILE", "")
+WEBUI_PROTOCOL = os.environ.get("WEBUI_PROTOCOL", "http").lower()
+WEBUI_ACCESS_MODE = os.environ.get("WEBUI_ACCESS_MODE", "all").lower()
+WEBUI_BIND_ADDRESS = os.environ.get("WEBUI_BIND_ADDRESS", "0.0.0.0")
+WEBUI_ALLOWED_CIDRS = os.environ.get("WEBUI_ALLOWED_CIDRS", "").strip()
+if WEBUI_ACCESS_MODE == "tailnet" and not WEBUI_ALLOWED_CIDRS:
+    WEBUI_ALLOWED_CIDRS = "100.64.0.0/10,fd7a:115c:a1e0::/48"
+
+try:
+    ALLOWED_NETWORKS = tuple(
+        ipaddress.ip_network(value.strip())
+        for value in WEBUI_ALLOWED_CIDRS.split(",")
+        if value.strip()
+    )
+except ValueError as exc:
+    raise RuntimeError("WEBUI_ALLOWED_CIDRS contains an invalid network") from exc
+
+if WEBUI_PROTOCOL not in ("http", "https"):
+    raise RuntimeError("WEBUI_PROTOCOL must be http or https")
+if WEBUI_ACCESS_MODE not in ("all", "tailnet"):
+    raise RuntimeError("WEBUI_ACCESS_MODE must be all or tailnet")
+if WEBUI_ACCESS_MODE == "tailnet" and WEBUI_BIND_ADDRESS in ("0.0.0.0", "::"):
+    raise RuntimeError("WEBUI_BIND_ADDRESS must be the host Tailscale IP in tailnet mode")
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Strict",
+    SESSION_COOKIE_SECURE=WEBUI_PROTOCOL == "https",
+)
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'")
+    if WEBUI_PROTOCOL == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return response
 
 SECRET_ENV_KEYS = {"TS_AUTHKEY", "PROTONVPN_PASSWORD", "WEBUI_PASSWORD"}
 ENV_FIELDS = [
@@ -49,6 +82,9 @@ ENV_FIELDS = [
     "WEBUI_USERNAME",
     "WEBUI_PASSWORD",
     "WEBUI_PORT",
+    "WEBUI_PROTOCOL",
+    "WEBUI_ACCESS_MODE",
+    "WEBUI_BIND_ADDRESS",
     "SETUP_COMPLETE",
 ]
 
@@ -58,6 +94,17 @@ HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
 def require_auth(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
+        if not WEBUI_PASSWORD:
+            return "Web UI disabled: set WEBUI_PASSWORD.", 503
+
+        if ALLOWED_NETWORKS:
+            try:
+                remote_ip = ipaddress.ip_address(request.remote_addr or "")
+            except ValueError:
+                return "Access denied.", 403
+            if not any(remote_ip in network for network in ALLOWED_NETWORKS):
+                return "Access denied.", 403
+
         auth = request.authorization
         valid = (
             auth is not None
@@ -123,8 +170,19 @@ def save_env(updates):
         if key not in seen:
             new_lines.append(f"{key}={value}\n")
 
-    with open(ENV_PATH, "w", encoding="utf-8") as f:
-        f.writelines(new_lines)
+    env_dir = os.path.dirname(ENV_PATH) or "."
+    os.makedirs(env_dir, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".env.", dir=env_dir, text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.writelines(new_lines)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, ENV_PATH)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 
 def read_status():
@@ -250,7 +308,26 @@ def save():
         "TS_HOSTNAME": ts_hostname,
         "TS_EXTRA_ARGS": request.form.get("ts_extra_args", "").strip(),
         "PROTONVPN_USER": request.form.get("protonvpn_user", "").strip(),
+        "WEBUI_USERNAME": request.form.get("webui_username", "").strip() or "admin",
+        "WEBUI_PROTOCOL": request.form.get("webui_protocol", "http").strip().lower(),
+        "WEBUI_ACCESS_MODE": request.form.get("webui_access_mode", "all").strip().lower(),
+        "WEBUI_BIND_ADDRESS": request.form.get("webui_bind_address", "0.0.0.0").strip(),
     }
+
+    if updates["WEBUI_PROTOCOL"] not in ("http", "https"):
+        flash("WEBUI_PROTOCOL deve ser http ou https.", "error")
+        return redirect(url_for(error_target))
+    if updates["WEBUI_ACCESS_MODE"] not in ("all", "tailnet"):
+        flash("WEBUI_ACCESS_MODE deve ser all ou tailnet.", "error")
+        return redirect(url_for(error_target))
+    if updates["WEBUI_ACCESS_MODE"] == "tailnet" and updates["WEBUI_BIND_ADDRESS"] == "0.0.0.0":
+        flash("No modo tailnet, indique o IP Tailscale do host em WEBUI_BIND_ADDRESS.", "error")
+        return redirect(url_for(error_target))
+
+    for key, value in updates.items():
+        if "\n" in value or "\r" in value:
+            flash(f"Valor inválido em {key}.", "error")
+            return redirect(url_for(error_target))
 
     if is_wizard:
         updates["SETUP_COMPLETE"] = "1"
@@ -263,6 +340,18 @@ def save():
     protonvpn_password = request.form.get("protonvpn_password", "").strip()
     if protonvpn_password:
         updates["PROTONVPN_PASSWORD"] = protonvpn_password
+
+    webui_password = request.form.get("webui_password", "").strip()
+    if webui_password:
+        if WEBUI_PASSWORD_FILE:
+            flash("A password vem de WEBUI_PASSWORD_FILE. Altere esse ficheiro no host.", "error")
+            return redirect(url_for(error_target))
+        updates["WEBUI_PASSWORD"] = webui_password
+
+    for key, value in updates.items():
+        if "\n" in value or "\r" in value:
+            flash(f"Valor inválido em {key}.", "error")
+            return redirect(url_for(error_target))
 
     # Uploads de ficheiros de configuração
     wg_conf = request.files.get("wg_conf")

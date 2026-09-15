@@ -1,4 +1,4 @@
-# Proton VPN to Tailscale Bridge Exit Node 🌐🛡️
+# Proton VPN to Tailscale Bridge Exit Node
 
 [English](README.md) | **Português**
 
@@ -27,12 +27,12 @@ graph LR
         D -->|Túnel Encriptado| E[🌍 Servidor Proton VPN]
     end
 
-    E -->|Navegação Anónima| F[🌐 Internet Pública]
+    E -->|IP público via Proton| F[🌐 Internet Pública]
 ```
 
 ---
 
-## 🧰 Requisitos Prévios
+## Requisitos Prévios
 
 1. **Conta Proton VPN** (o plano Free/Gratuito é totalmente compatível).
 2. **Conta Tailscale** com acesso à consola de administração.
@@ -40,7 +40,7 @@ graph LR
 
 ---
 
-## ⚡ Instalação Rápida (Recomendada via CLI)
+## Instalação Rápida (Recomendada via CLI)
 
 Para facilitar todo o processo de instalação e configuração, criamos um script interativo em Python que cria as pastas necessárias automaticamente, ajuda-o a gerar o ficheiro `.env` e inicia o container Docker de forma guiada.
 
@@ -54,7 +54,7 @@ Siga as instruções indicadas no ecrã! Se preferir realizar a configuração d
 
 ---
 
-## 🚀 Passo a Passo de Configuração Manual
+## Passo a Passo de Configuração Manual
 
 ### Passo 1: Preparar as Pastas de Configuração
 Crie a estrutura de pastas no diretório do projeto para colocar os seus ficheiros da VPN (já criadas se clonou com `.gitkeep`):
@@ -128,12 +128,12 @@ Pronto! O seu Exit Node está totalmente ativo e pronto para uso.
 
 ---
 
-## 🖥️ Web UI de Configuração
+## Web UI de Configuração
 
 Além do terminal, o projeto inclui uma interface web intuitiva para gerir a bridge sem precisar de aceder ao host por SSH:
 
 1. Após `docker compose up -d --build`, aceda a `http://<ip-do-host>:8080` (a porta é configurável através de `WEBUI_PORT` no `.env`).
-2. **Autenticação**: Defina `WEBUI_USERNAME`/`WEBUI_PASSWORD` no `.env` para credenciais fixas; se deixar `WEBUI_PASSWORD` em branco, é gerada uma palavra-passe aleatória a cada arranque, visível nos logs (`docker compose logs webui`).
+2. **Autenticação**: Defina `WEBUI_USERNAME`/`WEBUI_PASSWORD` no `.env` antes de iniciar a Web UI. A password vazia impede o arranque.
 3. **Assistente Inicial**: Na primeira utilização, a Web UI abre automaticamente um assistente de 4 passos com suporte para arrastar e largar os ficheiros de VPN.
 4. **Link de Login Manual**: Se não definir `TS_AUTHKEY`, o link para autenticar o Tailscale surge em destaque diretamente na Web UI.
 5. **Aplicação de Alterações**: Por segurança (para não expor o socket do Docker à Web UI), após gravar alterações no painel basta correr:
@@ -143,7 +143,7 @@ Além do terminal, o projeto inclui uma interface web intuitiva para gerir a bri
 
 ---
 
-## 📱 Como Usar nos Seus Dispositivos
+## Como Usar nos Seus Dispositivos
 
 1. Abra a aplicação do **Tailscale** no seu dispositivo (Telemóvel, Computador, etc.).
 2. Ligue-se à sua Tailnet.
@@ -153,19 +153,81 @@ Além do terminal, o projeto inclui uma interface web intuitiva para gerir a bri
 
 ---
 
-## 🔒 Segurança e Robustez de Rede
+## Segurança e Robustez de Rede
 
 * **Sem Modo Privilegiado (`privileged: false`)**: O contentor apenas utiliza as capacidades mínimas do Linux (`cap_add: NET_ADMIN, NET_RAW`), prevenindo riscos de segurança no anfitrião.
-* **Kill Switch com Firewall Estrito**:
+* **Kill Switch para tráfego encaminhado**:
   * Política padrão de firewall `iptables -P FORWARD DROP`.
   * Tráfego de saída só passa se for encaminhado através da interface segura da VPN (`protonvpn` ou `tun0`).
   * IPv6 é integralmente desativado dentro do container (`disable_ipv6=1` e `ip6tables -P FORWARD DROP`) para prevenir fugas de tráfego fora do túnel (IPv6 Leaks).
 * **Compatibilidade com Docker / resolvconf**: Tratamento transparente de `/etc/resolv.conf` sem causar conflitos de montagem no Docker com `openresolv`.
-* **Auto-healing e Healthchecks**: Healthchecks nativos para Tailscale e Web UI, com recuperação e reinício automático se a interface de VPN perder conectividade.
+* **Auto-healing e Healthchecks**: O bridge testa Tailscale, a interface VPN e um pedido HTTPS através da VPN. Depois de falhas consecutivas, sai para que o Docker o reinicie.
 * **Multi-Arquitetura**: Totalmente compatível com processadores `x86_64` (PC / Servidores) e `ARM64` (Raspberry Pi 4/5, Synology NAS, Apple Silicon).
 
 ---
 
-## 📄 Licença
+### Transporte e acesso da Web UI
+
+Configure estas variáveis no `.env` antes de iniciar os contentores:
+
+```dotenv
+WEBUI_USERNAME=admin
+WEBUI_PASSWORD=escolha-uma-password-forte
+WEBUI_PROTOCOL=http
+WEBUI_ACCESS_MODE=all
+WEBUI_BIND_ADDRESS=0.0.0.0
+```
+
+Para HTTPS, coloque o certificado e a chave em `webui/certs/fullchain.pem` e
+`webui/certs/privkey.pem`, e altere `WEBUI_PROTOCOL=https`. O certificado deve
+ser válido para o nome/IP usado no browser. Um certificado autoassinado mostra
+um aviso no browser e não deve ser usado numa publicação pública.
+Os ficheiros montados devem ser legíveis pelo utilizador do container da Web UI (UID 1000).
+
+Para restringir a porta à Tailnet, defina `WEBUI_ACCESS_MODE=tailnet` e use o
+IP Tailscale IPv4 do anfitrião, por exemplo:
+
+```dotenv
+WEBUI_ACCESS_MODE=tailnet
+WEBUI_BIND_ADDRESS=100.101.102.103
+```
+
+Para as credenciais, crie ficheiros com permissões apenas para o administrador
+em `secrets/` e use estas variáveis em vez de guardar os valores no `.env`:
+
+```dotenv
+TS_AUTHKEY_FILE=/run/secrets/ts_authkey
+PROTONVPN_USER_FILE=/run/secrets/protonvpn_user
+PROTONVPN_PASSWORD_FILE=/run/secrets/protonvpn_password
+WEBUI_PASSWORD_FILE=/run/secrets/webui_password
+```
+
+O modo `tailnet` também aceita por defeito as redes Tailscale IPv4 e IPv6. A
+restrição mais forte é o bind a um IP Tailscale específico. A Web UI escreve
+credenciais no `.env`, por isso não publique esta porta diretamente na Internet.
+
+### Matriz de compatibilidade
+
+| Plataforma | Estado | Notas |
+|---|---|---|
+| Debian/Ubuntu Linux com Docker Engine | Suportada | Requer `/dev/net/tun`, forwarding IPv4 e permissões de rede. |
+| Synology DSM 7.x com Container Manager | Suportada com validação | Confirmar `/dev/net/tun`, backend `iptables-legacy` e arquitetura do NAS. |
+| Raspberry Pi 4/5, Raspberry Pi OS 64-bit | Suportada | A imagem CI cobre `arm64`; testar o desempenho do OpenVPN no modelo usado. |
+| Docker Desktop em Windows/macOS | Não suportada para o bridge | A UI pode ser construída, mas o exit node requer o dispositivo TUN e rede Linux no anfitrião. |
+
+O teste de integração exige um segundo contentor com Tailscale. Consulte
+`tests/integration/test_exit_node.py` e defina `TS_CLIENT_CONTAINER` e
+`TS_EXIT_NODE` para o executar.
+
+As verificações locais são:
+
+```bash
+python -m pip install -r webui/requirements-dev.txt pip-audit
+pytest -q
+shellcheck entrypoint.sh healthcheck.sh webui/entrypoint.sh webui/healthcheck.sh
+pip-audit -r webui/requirements.txt
+```
+
+## Licença
 
 Distribuído sob a licença **MIT**. Consulte o ficheiro [LICENSE](LICENSE) para mais detalhes.

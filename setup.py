@@ -3,6 +3,7 @@ import os
 import sys
 import shutil
 import subprocess
+import getpass
 
 # Códigos de cores ANSI para um terminal bonito
 BLUE = "\033[94m"
@@ -26,20 +27,37 @@ def create_directories():
     print(f"{BLUE}A criar pastas de configuração...{RESET}")
     os.makedirs(os.path.join("vpn", "wireguard"), exist_ok=True)
     os.makedirs(os.path.join("vpn", "openvpn"), exist_ok=True)
+    os.makedirs("secrets", exist_ok=True)
     print(f"{GREEN}✓ Pastas './vpn/wireguard' e './vpn/openvpn' criadas.{RESET}")
     
     # Garantir que o ficheiro .env existe antes do Docker Compose para evitar que seja montado como diretório
+    env_created = False
     if not os.path.exists(".env") and os.path.exists(".env.example"):
         shutil.copyfile(".env.example", ".env")
+        env_created = True
         print(f"{GREEN}✓ Ficheiro base '.env' criado a partir de '.env.example'.{RESET}")
     print("")
+    return env_created
+
+
+def write_secret(name, value):
+    if not value:
+        return False
+    path = os.path.join("secrets", name)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(value + "\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+    return True
 
 def check_command(cmd):
     return shutil.which(cmd) is not None
 
 def main():
     print_banner()
-    create_directories()
+    env_created = create_directories()
 
     # 1. Escolha do tipo de VPN
     print(f"{BOLD}Passo 1: Selecionar o Protocolo de VPN{RESET}")
@@ -106,25 +124,83 @@ def main():
 
     print(f"{GREEN}✓ Configurações do Tailscale registadas.{RESET}\n")
 
-    # 4. Criar o ficheiro .env
-    print(f"{BOLD}Passo 4: Gerar o ficheiro de ambiente (.env){RESET}")
+    # 4. Configurar e proteger a Web UI
+    print(f"{BOLD}Passo 4: Configurar a Web UI{RESET}")
+    webui_username = input(f"{BLUE}Utilizador da Web UI [admin]: {RESET}").strip() or "admin"
+    webui_password = ""
+    while not webui_password:
+        webui_password = getpass.getpass(f"{BLUE}Palavra-passe da Web UI: {RESET}").strip()
+        if not webui_password:
+            print(f"{RED}A palavra-passe não pode ficar vazia.{RESET}")
+
+    webui_protocol = input(f"{BLUE}Protocolo da Web UI (http/https) [http]: {RESET}").strip().lower() or "http"
+    while webui_protocol not in ("http", "https"):
+        webui_protocol = input(f"{BLUE}Escolha http ou https: {RESET}").strip().lower()
+
+    webui_access = input(f"{BLUE}Acesso à Web UI (all/tailnet) [all]: {RESET}").strip().lower() or "all"
+    while webui_access not in ("all", "tailnet"):
+        webui_access = input(f"{BLUE}Escolha all ou tailnet: {RESET}").strip().lower()
+    webui_bind_address = "0.0.0.0"
+    if webui_access == "tailnet":
+        webui_bind_address = input(
+            f"{BLUE}IP Tailscale IPv4 do host (100.x.y.z): {RESET}"
+        ).strip()
+        if not webui_bind_address:
+            print(f"{RED}Indique o IP Tailscale do host para restringir a porta.{RESET}")
+            sys.exit(1)
+
+    # 5. Criar o ficheiro .env
+    print(f"{BOLD}Passo 5: Gerar o ficheiro de ambiente (.env){RESET}")
+    if os.path.exists(".env") and not env_created:
+        replace_env = input(f"{YELLOW}Já existe um .env. Substituí-lo? (s/N): {RESET}").strip().lower()
+        if replace_env != "s":
+            print(f"{YELLOW}Setup cancelado para preservar o .env existente.{RESET}")
+            sys.exit(0)
+
+    ts_authkey_file = ""
+    if write_secret("ts_authkey", ts_key):
+        ts_authkey_file = "/run/secrets/ts_authkey"
+    proton_user_file = ""
+    proton_password_file = ""
+    if write_secret("protonvpn_user", proton_user):
+        proton_user_file = "/run/secrets/protonvpn_user"
+    if write_secret("protonvpn_password", proton_pass):
+        proton_password_file = "/run/secrets/protonvpn_password"
+    write_secret("webui_password", webui_password)
+
     env_content = f"""# Configurações geradas via Setup CLI
 VPN_TYPE={vpn_type}
-TS_AUTHKEY={ts_key}
+TS_AUTHKEY=
+TS_AUTHKEY_FILE={ts_authkey_file}
 TS_HOSTNAME={ts_hostname}
-PROTONVPN_USER={proton_user}
-PROTONVPN_PASSWORD={proton_pass}
+PROTONVPN_USER=
+PROTONVPN_PASSWORD=
+PROTONVPN_USER_FILE={proton_user_file}
+PROTONVPN_PASSWORD_FILE={proton_password_file}
 TS_EXTRA_ARGS=
 WEBUI_PORT=8080
-WEBUI_USERNAME=admin
+WEBUI_USERNAME={webui_username}
 WEBUI_PASSWORD=
-"""
+WEBUI_PASSWORD_FILE=/run/secrets/webui_password
+WEBUI_PROTOCOL={webui_protocol}
+WEBUI_ACCESS_MODE={webui_access}
+WEBUI_BIND_ADDRESS={webui_bind_address}
+WEBUI_CERT_FILE=/certs/fullchain.pem
+WEBUI_KEY_FILE=/certs/privkey.pem
+VPN_CHECK_INTERVAL=30
+VPN_FAILURE_THRESHOLD=3
+VPN_HEALTHCHECK_URL=https://api.ipify.org
+ """
     with open(".env", "w") as f:
         f.write(env_content)
+    try:
+        os.chmod(".env", 0o600)
+    except OSError:
+        pass
     print(f"{GREEN}✓ Ficheiro '.env' atualizado com sucesso!{RESET}\n")
 
     # 5. Perguntar se quer rodar o container agora
-    print(f"{BOLD}Passo 5: Inicialização do Docker{RESET}")
+    print(f"{BOLD}Passo 6: Inicialização do Docker{RESET}")
     docker_installed = check_command("docker")
     compose_installed = check_command("docker-compose") or (docker_installed and subprocess.run(["docker", "compose", "version"], capture_output=True).returncode == 0)
 

@@ -11,6 +11,9 @@ vpn/openvpn/*
 *.conf
 *.ovpn
 credentials.txt
+secrets/*
+!secrets/.gitkeep
+webui/certs/*.pem
 
 # Python & WebUI
 __pycache__/

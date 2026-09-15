@@ -10,11 +10,16 @@ services:
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     devices:
       - /dev/net/tun:/dev/net/tun
     sysctls:
       # Pré-definidos aqui como reforço; o entrypoint também os define via sysctl -w
       - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
       - net.ipv6.conf.all.disable_ipv6=1
       - net.ipv6.conf.default.disable_ipv6=1
 
@@ -22,6 +27,8 @@ services:
       # Pastas onde colocará as configurações de VPN (.conf para WireGuard ou .ovpn/.txt para OpenVPN)
       - ./vpn/wireguard:/etc/wireguard:ro
       - ./vpn/openvpn:/etc/openvpn:ro
+      # Opcional: ficheiros root-only para TS_AUTHKEY e credenciais OpenVPN.
+      - ./secrets:/run/secrets:ro
       # Volume persistente para o estado do Tailscale
       - tailscale-data:/var/lib/tailscale
       # Ficheiro de estado partilhado, lido pela Web UI (protonvpn-tailscale-webui)
@@ -37,11 +44,17 @@ services:
       # Credenciais OpenVPN (caso utilize OpenVPN sem ficheiro credentials.txt)
       - PROTONVPN_USER=${PROTONVPN_USER}
       - PROTONVPN_PASSWORD=${PROTONVPN_PASSWORD}
+      - TS_AUTHKEY_FILE=${TS_AUTHKEY_FILE:-}
+      - PROTONVPN_USER_FILE=${PROTONVPN_USER_FILE:-}
+      - PROTONVPN_PASSWORD_FILE=${PROTONVPN_PASSWORD_FILE:-}
+      - VPN_CHECK_INTERVAL=${VPN_CHECK_INTERVAL:-30}
+      - VPN_FAILURE_THRESHOLD=${VPN_FAILURE_THRESHOLD:-3}
+      - VPN_HEALTHCHECK_URL=${VPN_HEALTHCHECK_URL:-https://api.ipify.org}
       # Argumentos adicionais opcionais para o comando 'tailscale up'
       - TS_EXTRA_ARGS=${TS_EXTRA_ARGS:-}
 
     healthcheck:
-      test: ["CMD-SHELL", "tailscale status >/dev/null 2>&1 && grep -q '\"connected\": true' /var/run/bridge-status/status.json 2>/dev/null || exit 1"]
+      test: ["CMD", "/healthcheck.sh"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -51,8 +64,15 @@ services:
     build: ./webui
     container_name: protonvpn-tailscale-webui
     restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
-      - "${WEBUI_PORT:-8080}:8080"
+      # 0.0.0.0 exposes the UI on all host interfaces. For Tailnet-only access,
+      # set WEBUI_BIND_ADDRESS to the host's Tailscale IPv4 address (100.x.y.z).
+      - "${WEBUI_BIND_ADDRESS:-0.0.0.0}:${WEBUI_PORT:-8080}:8080"
     volumes:
       # Acesso de leitura/escrita às pastas de configuração da VPN, para permitir
       # o upload dos ficheiros .conf/.ovpn/credentials.txt a partir da Web UI
@@ -60,14 +80,26 @@ services:
       - ./vpn/openvpn:/data/vpn/openvpn
       # O próprio ficheiro .env do projeto, para a Web UI poder ler/gravar as variáveis
       - ./.env:/data/.env
+      # Required only when WEBUI_PROTOCOL=https.
+      - ./webui/certs:/certs:ro
+      - ./secrets:/run/secrets:ro
       # Estado do bridge, apenas em leitura
       - bridge-status:/var/run/bridge-status:ro
+    tmpfs:
+      - /tmp
     environment:
       - WEBUI_USERNAME=${WEBUI_USERNAME:-admin}
       - WEBUI_PASSWORD=${WEBUI_PASSWORD:-}
+      - WEBUI_PASSWORD_FILE=${WEBUI_PASSWORD_FILE:-}
+      - WEBUI_PROTOCOL=${WEBUI_PROTOCOL:-http}
+      - WEBUI_ACCESS_MODE=${WEBUI_ACCESS_MODE:-all}
+      - WEBUI_BIND_ADDRESS=${WEBUI_BIND_ADDRESS:-0.0.0.0}
+      - WEBUI_ALLOWED_CIDRS=${WEBUI_ALLOWED_CIDRS:-}
+      - WEBUI_CERT_FILE=${WEBUI_CERT_FILE:-/certs/fullchain.pem}
+      - WEBUI_KEY_FILE=${WEBUI_KEY_FILE:-/certs/privkey.pem}
 
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://127.0.0.1:8080/healthz\")' || exit 1"]
+      test: ["CMD", "./healthcheck.sh"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -2,6 +2,7 @@
 
 # Terminar imediatamente em caso de erro não tratado
 set -e
+umask 077
 
 echo "============================================="
 echo "   Tailscale - Proton VPN Bridge Exit Node   "
@@ -36,6 +37,23 @@ trap cleanup SIGTERM SIGINT
 STATUS_DIR="/var/run/bridge-status"
 STATUS_FILE="$STATUS_DIR/status.json"
 mkdir -p "$STATUS_DIR"
+read_secret_file() {
+    [ -n "${1:-}" ] && [ -r "$1" ] || {
+        echo "Erro: secret file ausente ou ilegível: ${1:-}" >&2
+        exit 1
+    }
+    tr -d '\r\n' < "$1"
+}
+
+if [ -n "${TS_AUTHKEY_FILE:-}" ]; then
+    TS_AUTHKEY="$(read_secret_file "$TS_AUTHKEY_FILE")"
+fi
+if [ -n "${PROTONVPN_USER_FILE:-}" ]; then
+    PROTONVPN_USER="$(read_secret_file "$PROTONVPN_USER_FILE")"
+fi
+if [ -n "${PROTONVPN_PASSWORD_FILE:-}" ]; then
+    PROTONVPN_PASSWORD="$(read_secret_file "$PROTONVPN_PASSWORD_FILE")"
+fi
 
 write_status() {
     local connected="$1"
@@ -44,7 +62,8 @@ write_status() {
     if [ "$connected" = "true" ]; then
         ts_ip=$(tailscale ip -4 2>/dev/null | head -n1)
     fi
-    cat > "$STATUS_FILE" <<EOF
+    local status_tmp="${STATUS_FILE}.tmp.$$"
+    cat > "$status_tmp" <<EOF
 {
   "vpn_mode": "${VPN_MODE:-}",
   "vpn_interface": "${VPN_INTERFACE:-}",
@@ -55,6 +74,10 @@ write_status() {
   "last_updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
+    # A Web UI runs as an unprivileged user in another container and only needs
+    # to read this status file. It never contains VPN credentials.
+    chmod 0644 "$status_tmp"
+    mv -f "$status_tmp" "$STATUS_FILE"
 }
 
 write_status "false"
@@ -135,7 +158,9 @@ TAILSCALED_PID=$!
 
 # Aguardar que o socket do tailscaled fique ativo
 echo "A aguardar pelo socket do Tailscale..."
-for i in {1..30}; do
+socket_wait=0
+while [ "$socket_wait" -lt 30 ]; do
+    socket_wait=$((socket_wait + 1))
     if [ -S /var/run/tailscale/tailscaled.sock ]; then
         break
     fi
@@ -156,7 +181,16 @@ if [ "$VPN_MODE" = "wireguard" ]; then
     
     # Prevenir conflitos do resolvconf com Docker bind-mounts em /etc/resolv.conf
     # Cria uma cópia funcional do ficheiro sem a diretiva DNS do wg-quick
-    sed 's/^\([[:space:]]*DNS[[:space:]]*=\)/# \1/gI' "$WG_CONF" > "$WG_RUNNING_CONF"
+    IPV6_DISABLED=$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo "0")
+    if [ "$IPV6_DISABLED" = "1" ]; then
+        sed -E \
+            -e 's/^([[:space:]]*Address[[:space:]]*=[^,]+),.*/\1/' \
+            -e 's/^([[:space:]]*AllowedIPs[[:space:]]*=[^,]+),.*/\1/' \
+            -e 's/^([[:space:]]*DNS[[:space:]]*=)/# \1/gI' \
+            "$WG_CONF" > "$WG_RUNNING_CONF"
+    else
+        sed 's/^\([[:space:]]*DNS[[:space:]]*=\)/# \1/gI' "$WG_CONF" > "$WG_RUNNING_CONF"
+    fi
     DNS_SERVERS=$(grep -i "^[[:space:]]*DNS" "$WG_CONF" | head -n1 | cut -d'=' -f2 | tr ',' ' ')
 
     # Verificar se o módulo de kernel WireGuard está disponível na máquina hospedeira.
@@ -168,9 +202,35 @@ if [ "$VPN_MODE" = "wireguard" ]; then
         ip link delete dev wg-test-link
     fi
     
+    # Em Docker-in-LXC, o namespace pode impedir a escrita de
+    # net.ipv4.conf.all.src_valid_mark. Nesse caso, o routing automÃ¡tico do
+    # wg-quick falha; usamos Table=off e instalamos as rotas equivalentes.
+    WG_MANUAL_ROUTING="0"
+    if ! sysctl -q net.ipv4.conf.all.src_valid_mark=1 2>/dev/null; then
+        WG_ENDPOINT=$(awk -F= '/^[[:space:]]*Endpoint[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' "$WG_RUNNING_CONF")
+        WG_ENDPOINT_IP="${WG_ENDPOINT%:*}"
+        WG_DEFAULT_ROUTE=$(ip route show default | awk '$1 == "default" {print $3, $5; exit}')
+        WG_DEFAULT_GATEWAY=${WG_DEFAULT_ROUTE%% *}
+        WG_DEFAULT_DEVICE=${WG_DEFAULT_ROUTE#* }
+        if [ -z "$WG_ENDPOINT_IP" ] || [ -z "$WG_DEFAULT_GATEWAY" ] || [ -z "$WG_DEFAULT_DEVICE" ]; then
+            echo "Erro: nÃ£o foi possÃ­vel determinar a rota original para o endpoint WireGuard."
+            exit 1
+        fi
+        sed '/^\[Interface\]$/a Table = off' "$WG_RUNNING_CONF" > /tmp/protonvpn.tmp.conf
+        mv -f /tmp/protonvpn.tmp.conf /tmp/protonvpn.conf
+        WG_RUNNING_CONF="/tmp/protonvpn.conf"
+        WG_MANUAL_ROUTING="1"
+        echo "Aviso: a usar routing WireGuard manual (ambiente Docker-in-LXC)."
+    fi
+
     # Iniciar WireGuard
     wg-quick up "$WG_RUNNING_CONF"
     VPN_INTERFACE="protonvpn"
+
+    if [ "$WG_MANUAL_ROUTING" = "1" ]; then
+        ip route replace "${WG_ENDPOINT_IP}/32" via "$WG_DEFAULT_GATEWAY" dev "$WG_DEFAULT_DEVICE"
+        ip route replace default dev "$VPN_INTERFACE"
+    fi
 
     # Aplicar DNS do túnel VPN diretamente a /etc/resolv.conf sem quebrar o bind mount
     if [ -n "$DNS_SERVERS" ]; then
@@ -195,11 +255,14 @@ elif [ "$VPN_MODE" = "openvpn" ]; then
     # Iniciar OpenVPN em segundo plano
     openvpn --config "$OVPN_CONF" --auth-user-pass "$OVPN_CREDS" --dev tun0 --auth-nocache &
     OPENVPN_PID=$!
+    unset PROTONVPN_PASSWORD
     VPN_INTERFACE="tun0"
     
     # Aguardar até que a interface tun0 esteja criada e tenha um IP
     echo "A aguardar pela interface tun0 do OpenVPN..."
-    for i in {1..30}; do
+    vpn_wait=0
+    while [ "$vpn_wait" -lt 30 ]; do
+        vpn_wait=$((vpn_wait + 1))
         if ip addr show dev tun0 2>/dev/null | grep -q "inet "; then
             break
         fi
@@ -216,7 +279,13 @@ echo "Conexão VPN estabelecida com sucesso na interface $VPN_INTERFACE!"
 
 # 4. Configurar Encaminhamento e Regras do Firewall (iptables NAT)
 echo "A ativar o IP forwarding (IPv4)..."
-sysctl -w net.ipv4.ip_forward=1
+if ! sysctl -w net.ipv4.ip_forward=1 2>/dev/null; then
+    if [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" != "1" ]; then
+        echo "Erro: não foi possível ativar net.ipv4.ip_forward."
+        exit 1
+    fi
+    echo "Aviso: net.ipv4.ip_forward já estava ativo; a escrita foi recusada pelo ambiente."
+fi
 
 # Desativar IPv6 por completo para prevenir fugas (leaks) de tráfego fora do túnel:
 # a Proton VPN (Free) e a generalidade dos servidores WireGuard/OpenVPN gratuitos não
@@ -252,9 +321,9 @@ HOSTNAME="${TS_HOSTNAME:-protonvpn-bridge}"
 echo "A registar dispositivo no Tailscale com o hostname '$HOSTNAME'..."
 
 # Configurar argumentos adicionais
-EXTRA_ARGS=""
+EXTRA_ARGS_ARRAY=()
 if [ -n "$TS_EXTRA_ARGS" ]; then
-    EXTRA_ARGS="$TS_EXTRA_ARGS"
+    read -r -a EXTRA_ARGS_ARRAY <<< "$TS_EXTRA_ARGS"
 fi
 
 TS_UP_LOG="/tmp/tailscale-up.log"
@@ -268,12 +337,15 @@ tailscale up \
     --hostname="${HOSTNAME}" \
     --advertise-exit-node \
     --accept-routes=false \
-    $EXTRA_ARGS > "$TS_UP_LOG" 2>&1 &
+    --accept-dns=false \
+    "${EXTRA_ARGS_ARRAY[@]}" > "$TS_UP_LOG" 2>&1 &
 TS_UP_PID=$!
 
 if [ -z "$TS_AUTHKEY" ]; then
     echo "Aviso: TS_AUTHKEY não foi definida. A aguardar link de autenticação manual..."
-    for i in $(seq 1 60); do
+    auth_wait=0
+    while [ "$auth_wait" -lt 60 ]; do
+        auth_wait=$((auth_wait + 1))
         TS_LOGIN_URL=$(grep -oE 'https://login\.tailscale\.com/a/[A-Za-z0-9]+' "$TS_UP_LOG" 2>/dev/null | head -n1)
         if [ -n "$TS_LOGIN_URL" ]; then
             echo "Link de autenticação: $TS_LOGIN_URL"
@@ -294,6 +366,7 @@ if ! wait "$TS_UP_PID"; then
     write_status "false"
     exit 1
 fi
+unset TS_AUTHKEY
 
 echo "=========================================================="
 echo "  A Bridge Proton VPN -> Tailscale Exit Node está ATIVA! "
@@ -304,7 +377,18 @@ echo "=========================================================="
 
 write_status "true"
 
-# 6. Loop de Monitorização da Conexão
+VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
+VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
+VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
+vpn_failures=0
+
+check_vpn_connectivity() {
+    tailscale status >/dev/null 2>&1 || return 1
+    ip addr show dev "$VPN_INTERFACE" 2>/dev/null | grep -q "inet " || return 1
+    curl --interface "$VPN_INTERFACE" --fail --silent --show-error \
+        --max-time 10 "$VPN_HEALTHCHECK_URL" >/dev/null
+}
+
 while true; do
     # Verificar se o daemon do Tailscale continua a correr
     if ! kill -0 "$TAILSCALED_PID" 2>/dev/null; then
@@ -322,13 +406,17 @@ while true; do
         fi
     fi
 
-    # Verificar se a interface VPN continua ativa e com IP
-    if ! ip addr show dev "$VPN_INTERFACE" 2>/dev/null | grep -q "inet "; then
-        echo "Erro: A interface VPN ($VPN_INTERFACE) perdeu o endereço IP. A reiniciar container..."
+    if check_vpn_connectivity; then
+        vpn_failures=0
+        write_status "true"
+    else
+        vpn_failures=$((vpn_failures + 1))
+        echo "Aviso: teste de conectividade VPN falhou ($vpn_failures/$VPN_FAILURE_THRESHOLD)."
         write_status "false"
-        exit 1
+        if [ "$vpn_failures" -ge "$VPN_FAILURE_THRESHOLD" ]; then
+            echo "Erro: a VPN não recuperou. A reiniciar o container..."
+            exit 1
+        fi
     fi
-
-    write_status "true"
-    sleep 5
+    sleep "$VPN_CHECK_INTERVAL"
 done

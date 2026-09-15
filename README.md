@@ -1,4 +1,4 @@
-# Proton VPN to Tailscale Bridge Exit Node 🌐🛡️
+# Proton VPN to Tailscale Bridge Exit Node
 
 **English** | [Português](README.pt.md)
 
@@ -10,7 +10,7 @@
 
 Route all your private Tailscale network traffic through **Proton VPN** (including the **100% Free tier**) via a lightweight Docker exit node.
 
-Whenever any device on your Tailnet (smartphone, laptop, tablet) connects to this Exit Node, its internet traffic is encrypted and tunnelled securely through Proton VPN servers with full leak protection and kill switch capabilities.
+Whenever any device on your Tailnet (smartphone, laptop, tablet) connects to this Exit Node, its internet traffic is routed through Proton VPN servers.
 
 ```mermaid
 graph LR
@@ -27,16 +27,16 @@ graph LR
         D -->|Encrypted Tunnel| E[🌍 Proton VPN Server]
     end
 
-    E -->|Anonymous Browsing| F[🌐 Public Internet]
+        E -->|Public IP via Proton| F[🌐 Public Internet]
 ```
 
 ---
 
-## ✨ Features
+## Features
 
 - **WireGuard & OpenVPN Support**: Optimized for WireGuard (faster speed, minimal CPU usage) with full OpenVPN fallback.
-- **Works with Proton VPN Free**: No paid plan required — supports Proton VPN Free tier server configurations.
-- **Built-in Kill Switch & Leak Protection**: Drops all outgoing unencrypted traffic (`iptables -P FORWARD DROP`) and disables IPv6 inside the container to prevent IPv6 traffic leaks.
+- **Works with Proton VPN Free**: No paid plan required. Supports Proton VPN Free tier server configurations.
+- **Forwarding kill switch**: Drops forwarded traffic unless it uses the VPN interface. Validate DNS and IPv6 behaviour on the client you use.
 - **Non-Privileged Container**: Operates without `privileged: true`, using only minimum Linux capabilities (`NET_ADMIN`, `NET_RAW`).
 - **Interactive Web UI**: Modern web dashboard with drag-and-drop file upload, setup wizard, and real-time status monitoring.
 - **Interactive Setup CLI**: Guided terminal wizard (`python setup.py`) to configure your environment in seconds.
@@ -45,7 +45,7 @@ graph LR
 
 ---
 
-## 🧰 Prerequisites
+## Prerequisites
 
 1. **Proton VPN Account** (Free or Paid tier).
 2. **Tailscale Account** with access to the Tailscale admin console.
@@ -53,7 +53,7 @@ graph LR
 
 ---
 
-## ⚡ Quick Start (CLI Wizard)
+## Quick Start (CLI Wizard)
 
 An interactive Python setup script is included to automatically create directories, configure `.env`, and start the containers:
 
@@ -65,7 +65,7 @@ Follow the prompts on your terminal. If you prefer manual setup, follow the guid
 
 ---
 
-## 🚀 Manual Step-by-Step Setup
+## Manual Step-by-Step Setup
 
 ### Step 1: Clone Repository & Prepare Directories
 
@@ -144,11 +144,11 @@ Your Proton VPN Exit Node is now live!
 
 ---
 
-## 🖥️ Web UI Dashboard
+## Web UI Dashboard
 
 A lightweight web dashboard is available at `http://<host-ip>:8080`:
 
-1. **Authentication**: Uses HTTP Basic Auth (`WEBUI_USERNAME` and `WEBUI_PASSWORD`). If no password is set, a temporary one is printed in `docker compose logs webui`.
+1. **Authentication**: Uses HTTP Basic Auth (`WEBUI_USERNAME` and `WEBUI_PASSWORD`). `WEBUI_PASSWORD` must be set before starting the Web UI.
 2. **First Run Wizard**: Automatically launches a 4-step wizard with drag-and-drop file upload for `.conf` or `.ovpn` files.
 3. **Manual Login Link**: If no `TS_AUTHKEY` is provided, a clickable login link appears dynamically in the header.
 4. **Apply Changes**: Because the Web UI does not access the Docker socket for security reasons, apply saved modifications with:
@@ -158,7 +158,7 @@ A lightweight web dashboard is available at `http://<host-ip>:8080`:
 
 ---
 
-## 📱 How to Use on Your Devices
+## How to Use on Your Devices
 
 1. Open the **Tailscale** client on your smartphone, tablet, or laptop.
 2. Connect to your Tailnet.
@@ -167,17 +167,79 @@ A lightweight web dashboard is available at `http://<host-ip>:8080`:
 
 ---
 
-## 🔒 Security & Architecture Details
+## Security & Architecture Details
 
 - **Minimal Privileges**: Runs with specific Linux capabilities (`NET_ADMIN` and `NET_RAW`) and `/dev/net/tun` rather than full `privileged: true`.
-- **Strict Leak Prevention**:
+- **Forwarding kill switch**:
   - `iptables -P FORWARD DROP`: Default policy drops all routed packets. Packets are forwarded strictly through the VPN interface (`protonvpn` / `tun0`).
-  - Container-level IPv6 disabling (`disable_ipv6=1`) and `ip6tables -P FORWARD DROP` ensure zero IPv6 traffic leaks.
+  - Container-level IPv6 disabling and `ip6tables -P FORWARD DROP` protect forwarded traffic. Validate DNS and IPv6 behaviour on the client you use.
 - **Docker DNS Compatibility**: Transparently manages `/etc/resolv.conf` to avoid `openresolv` bind-mount collisions common in Docker environments.
-- **Auto-Healing**: Continually monitors the VPN connection and Tailscale daemon. If the VPN drops, the container exits and Docker restarts it (`restart: unless-stopped`).
+- **Auto-Healing**: Monitors Tailscale, the VPN interface, and a real HTTPS request through the VPN. After consecutive failures, the container exits and Docker restarts it (`restart: unless-stopped`).
 
 ---
 
-## 📄 License
+### Web UI transport and access
+
+Configure these variables in `.env` before starting the containers:
+
+```dotenv
+WEBUI_USERNAME=admin
+WEBUI_PASSWORD=choose-a-strong-password
+WEBUI_PROTOCOL=http
+WEBUI_ACCESS_MODE=all
+WEBUI_BIND_ADDRESS=0.0.0.0
+```
+
+For HTTPS, put the certificate and key at `webui/certs/fullchain.pem` and
+`webui/certs/privkey.pem`, then set `WEBUI_PROTOCOL=https`. The certificate
+must match the hostname or IP used by the browser. A self-signed certificate
+will show a browser warning and is not suitable for a public deployment.
+The mounted certificate files must be readable by the Web UI container user (UID 1000).
+
+To restrict the published port to the Tailnet, set `WEBUI_ACCESS_MODE=tailnet`
+and use the host's Tailscale IPv4 address:
+
+```dotenv
+WEBUI_ACCESS_MODE=tailnet
+WEBUI_BIND_ADDRESS=100.101.102.103
+```
+
+For credentials, create root-only files under `secrets/` and use the file
+variables instead of putting values in `.env`:
+
+```dotenv
+TS_AUTHKEY_FILE=/run/secrets/ts_authkey
+PROTONVPN_USER_FILE=/run/secrets/protonvpn_user
+PROTONVPN_PASSWORD_FILE=/run/secrets/protonvpn_password
+WEBUI_PASSWORD_FILE=/run/secrets/webui_password
+```
+
+The `tailnet` mode also allows the usual Tailscale IPv4 and IPv6 ranges. Binding
+to a specific Tailscale IP is the stronger restriction. The Web UI writes VPN
+credentials and `.env`, so do not publish this port directly to the Internet.
+
+### Compatibility matrix
+
+| Platform | Status | Notes |
+|---|---|---|
+| Debian/Ubuntu Linux with Docker Engine | Supported | Requires `/dev/net/tun`, IPv4 forwarding, and network permissions. |
+| Synology DSM 7.x with Container Manager | Supported with validation | Confirm `/dev/net/tun`, `iptables-legacy`, and the NAS architecture. |
+| Raspberry Pi 4/5, 64-bit Raspberry Pi OS | Supported | CI covers `arm64`; test OpenVPN performance on the target model. |
+| Docker Desktop on Windows/macOS | Bridge not supported | The UI may build, but the exit node needs the TUN device and Linux host networking. |
+
+The integration test needs a second container running Tailscale. See
+`tests/integration/test_exit_node.py` and set `TS_CLIENT_CONTAINER` and
+`TS_EXIT_NODE` before running it.
+
+The local checks are:
+
+```bash
+python -m pip install -r webui/requirements-dev.txt pip-audit
+pytest -q
+shellcheck entrypoint.sh healthcheck.sh webui/entrypoint.sh webui/healthcheck.sh
+pip-audit -r webui/requirements.txt
+```
+
+## License
 
 This project is open-source software licensed under the [MIT License](LICENSE).

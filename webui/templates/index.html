@@ -71,6 +71,32 @@
       <input type="text" name="ts_extra_args" value="{{ env.TS_EXTRA_ARGS }}">
     </fieldset>
 
+    <fieldset>
+      <legend>Web UI</legend>
+      <label>Utilizador</label>
+      <input type="text" name="webui_username" value="{{ env.WEBUI_USERNAME or 'admin' }}" autocomplete="username">
+
+      <label>Palavra-passe
+        <span class="hint">(definida — deixe em branco para manter)</span>
+      </label>
+      <input type="password" name="webui_password" autocomplete="new-password">
+
+      <label>Protocolo</label>
+      <div class="radio-group">
+        <label><input type="radio" name="webui_protocol" value="http" {% if env.WEBUI_PROTOCOL != 'https' %}checked{% endif %}> HTTP</label>
+        <label><input type="radio" name="webui_protocol" value="https" {% if env.WEBUI_PROTOCOL == 'https' %}checked{% endif %}> HTTPS</label>
+      </div>
+      <p class="hint">HTTPS requer <code>webui/certs/fullchain.pem</code> e <code>privkey.pem</code>.</p>
+
+      <label>Acesso</label>
+      <div class="radio-group">
+        <label><input type="radio" name="webui_access_mode" value="all" {% if env.WEBUI_ACCESS_MODE != 'tailnet' %}checked{% endif %}> Todas as interfaces</label>
+        <label><input type="radio" name="webui_access_mode" value="tailnet" {% if env.WEBUI_ACCESS_MODE == 'tailnet' %}checked{% endif %}> Apenas Tailnet</label>
+      </div>
+      <label>IP de bind do host</label>
+      <input type="text" name="webui_bind_address" value="{{ env.WEBUI_BIND_ADDRESS or '0.0.0.0' }}" placeholder="0.0.0.0 ou 100.x.y.z">
+    </fieldset>
+
     <div class="actions">
       <button type="submit" class="btn">Gravar configuração</button>
       <a class="btn ghost" href="{{ url_for('wizard') }}">Executar assistente novamente</a>

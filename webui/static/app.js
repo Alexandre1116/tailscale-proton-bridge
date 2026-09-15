@@ -79,7 +79,11 @@
 
       function announce() {
         if (input.files && input.files.length) {
-          label.innerHTML = 'Selecionado: <span class="filename">' + input.files[0].name + "</span>";
+          label.textContent = "Selecionado: ";
+          var filename = document.createElement("span");
+          filename.className = "filename";
+          filename.textContent = input.files[0].name;
+          label.appendChild(filename);
         }
       }
 

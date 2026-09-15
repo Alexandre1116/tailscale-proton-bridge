@@ -15,6 +15,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test and audit dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r webui/requirements-dev.txt pip-audit
+
+      - name: Run Python tests
+        run: pytest -q
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install --yes shellcheck
+
+      - name: Run ShellCheck
+        run: shellcheck entrypoint.sh healthcheck.sh webui/entrypoint.sh webui/healthcheck.sh
+
+      - name: Audit Python dependencies
+        run: pip-audit -r webui/requirements.txt
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -29,6 +51,22 @@ jobs:
           push: false
           tags: protonvpn-tailscale-bridge:latest
 
+      - name: Build bridge image for vulnerability scan
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: protonvpn-tailscale-bridge:ci
+
+      - name: Scan bridge image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: protonvpn-tailscale-bridge:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
       - name: Build WebUI Image
         uses: docker/build-push-action@v5
         with:
@@ -36,3 +74,19 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: false
           tags: protonvpn-tailscale-webui:latest
+
+      - name: Build WebUI image for vulnerability scan
+        uses: docker/build-push-action@v6
+        with:
+          context: ./webui
+          load: true
+          tags: protonvpn-tailscale-webui:ci
+
+      - name: Scan WebUI image with Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: protonvpn-tailscale-webui:ci
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
