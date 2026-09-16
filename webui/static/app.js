@@ -72,7 +72,7 @@
     if (previousTraffic && !hasNewSample) {
       panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
       var intervalSeconds = Number(panel.dataset.pollInterval) || 2;
-      if (Date.now() - sampleTime > Math.max(intervalSeconds * 1000, 2500)) {
+      if (Date.now() - sampleTime > Math.max(intervalSeconds * 1000 + 2000, 2500)) {
         previousTraffic = null;
         resetTraffic();
       }

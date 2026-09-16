@@ -235,10 +235,12 @@ def read_status():
         try:
             with open(TRAFFIC_FILE, "r", encoding="utf-8") as f:
                 traffic = json.load(f)
+            if not isinstance(traffic, dict):
+                raise ValueError("traffic status must be a JSON object")
             for key in traffic_keys:
                 if key in traffic:
                     default[key] = str(traffic[key]) if key != "traffic_updated" else traffic[key]
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
             default["error"] = "could not read traffic status"
 
     return default

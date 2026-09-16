@@ -179,6 +179,9 @@ footer.page-footer { padding-top: 28px; color: var(--muted); font-family: var(--
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .traffic-dot { animation: none !important; opacity: 0.85; }
+  .traffic-panel.flow-ingress .dot-ingress,
+  .traffic-panel.flow-egress .dot-egress,
+  .traffic-panel.flow-return .dot-return-vpn,
+  .traffic-panel.flow-return .dot-return-tailnet { animation: none !important; opacity: 0.85; }
   .dropzone { transition: none; }
 }

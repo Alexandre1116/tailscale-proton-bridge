@@ -77,6 +77,20 @@ def test_status_keeps_health_state_when_live_traffic_updates_separately(client, 
     assert data["traffic_updated"] == "traffic-time"
 
 
+def test_status_handles_non_object_traffic_json(client, tmp_path, monkeypatch):
+    status_path = tmp_path / "status.json"
+    traffic_path = tmp_path / "traffic.json"
+    status_path.write_text(json.dumps({"connected": True}), encoding="utf-8")
+    traffic_path.write_text("null", encoding="utf-8")
+    monkeypatch.setattr(webapp, "STATUS_FILE", str(status_path))
+    monkeypatch.setattr(webapp, "TRAFFIC_FILE", str(traffic_path))
+
+    response = client.get("/api/status", headers=auth_header())
+
+    assert response.status_code == 200
+    assert response.get_json()["error"] == "could not read traffic status"
+
+
 def test_tailnet_access_mode_rejects_non_tailnet_clients(client, monkeypatch):
     monkeypatch.setattr(webapp, "ALLOWED_NETWORKS", (ipaddress.ip_network("100.64.0.0/10"),))
 
