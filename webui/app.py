@@ -36,9 +36,10 @@ WEBUI_ACCESS_MODE = os.environ.get("WEBUI_ACCESS_MODE", "all").lower()
 WEBUI_BIND_ADDRESS = os.environ.get("WEBUI_BIND_ADDRESS", "0.0.0.0")
 WEBUI_ALLOWED_CIDRS = os.environ.get("WEBUI_ALLOWED_CIDRS", "").strip()
 try:
-    STATUS_UPDATE_INTERVAL = int(os.environ.get("STATUS_UPDATE_INTERVAL", "2"))
-    if STATUS_UPDATE_INTERVAL < 1:
+    STATUS_UPDATE_INTERVAL_VALUE = os.environ.get("STATUS_UPDATE_INTERVAL", "2")
+    if not re.fullmatch(r"[1-9][0-9]*", STATUS_UPDATE_INTERVAL_VALUE):
         raise ValueError
+    STATUS_UPDATE_INTERVAL = int(STATUS_UPDATE_INTERVAL_VALUE)
 except ValueError as exc:
     raise RuntimeError("STATUS_UPDATE_INTERVAL must be a positive integer") from exc
 if WEBUI_ACCESS_MODE == "tailnet" and not WEBUI_ALLOWED_CIDRS:
@@ -197,14 +198,14 @@ def read_status():
         "connected": False,
         "tailscale_ip": "",
         "hostname": "",
-        "tailscale_rx_bytes": 0,
-        "tailscale_tx_bytes": 0,
-        "tailscale_rx_packets": 0,
-        "tailscale_tx_packets": 0,
-        "vpn_rx_bytes": 0,
-        "vpn_tx_bytes": 0,
-        "vpn_rx_packets": 0,
-        "vpn_tx_packets": 0,
+        "tailscale_rx_bytes": "0",
+        "tailscale_tx_bytes": "0",
+        "tailscale_rx_packets": "0",
+        "tailscale_tx_packets": "0",
+        "vpn_rx_bytes": "0",
+        "vpn_tx_bytes": "0",
+        "vpn_rx_packets": "0",
+        "vpn_tx_packets": "0",
         "traffic_updated": None,
         "auth_url": "",
         "last_updated": None,
@@ -227,11 +228,16 @@ def read_status():
         "vpn_tx_packets",
         "traffic_updated",
     }
+    for key in traffic_keys:
+        if key in default and key != "traffic_updated":
+            default[key] = str(default[key])
     if default["connected"] and os.path.isfile(TRAFFIC_FILE):
         try:
             with open(TRAFFIC_FILE, "r", encoding="utf-8") as f:
                 traffic = json.load(f)
-            default.update({key: traffic[key] for key in traffic_keys if key in traffic})
+            for key in traffic_keys:
+                if key in traffic:
+                    default[key] = str(traffic[key]) if key != "traffic_updated" else traffic[key]
         except (json.JSONDecodeError, OSError):
             default["error"] = "could not read traffic status"
 

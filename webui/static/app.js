@@ -13,9 +13,13 @@
     if (el) el.textContent = value;
   }
 
-  function numberValue(value) {
-    var parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  function counterValue(value) {
+    try {
+      var parsed = BigInt(String(value));
+      return parsed >= 0n ? parsed : 0n;
+    } catch (error) {
+      return 0n;
+    }
   }
 
   function formatBytes(value) {
@@ -26,7 +30,7 @@
   }
 
   function formatPackets(value) {
-    return new Intl.NumberFormat().format(Math.round(value)) + " packets";
+    return new Intl.NumberFormat().format(value) + " packets";
   }
 
   function resetTraffic() {
@@ -39,51 +43,63 @@
   }
 
   function updateTraffic(data, panel) {
-    var now = Date.now();
-    var sampleTime = Date.parse(data.traffic_updated || data.last_updated || "");
-    if (!Number.isFinite(sampleTime)) sampleTime = now;
+    if (!data.connected || !data.traffic_updated) {
+      previousTraffic = null;
+      panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
+      resetTraffic();
+      return;
+    }
+    var sampleTime = Date.parse(data.traffic_updated);
+    if (!Number.isFinite(sampleTime)) {
+      previousTraffic = null;
+      panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
+      resetTraffic();
+      return;
+    }
     if (previousTraffic && sampleTime < previousTraffic.sampleTime) return;
     var hasNewSample = !previousTraffic || sampleTime > previousTraffic.sampleTime;
     var current = {
-      tailscale_rx_bytes: numberValue(data.tailscale_rx_bytes),
-      tailscale_tx_bytes: numberValue(data.tailscale_tx_bytes),
-      tailscale_rx_packets: numberValue(data.tailscale_rx_packets),
-      tailscale_tx_packets: numberValue(data.tailscale_tx_packets),
-      vpn_rx_bytes: numberValue(data.vpn_rx_bytes),
-      vpn_tx_bytes: numberValue(data.vpn_tx_bytes),
-      vpn_rx_packets: numberValue(data.vpn_rx_packets),
-      vpn_tx_packets: numberValue(data.vpn_tx_packets)
+      tailscale_rx_bytes: counterValue(data.tailscale_rx_bytes),
+      tailscale_tx_bytes: counterValue(data.tailscale_tx_bytes),
+      tailscale_rx_packets: counterValue(data.tailscale_rx_packets),
+      tailscale_tx_packets: counterValue(data.tailscale_tx_packets),
+      vpn_rx_bytes: counterValue(data.vpn_rx_bytes),
+      vpn_tx_bytes: counterValue(data.vpn_tx_bytes),
+      vpn_rx_packets: counterValue(data.vpn_rx_packets),
+      vpn_tx_packets: counterValue(data.vpn_tx_packets)
     };
-    var elapsed = previousTraffic && hasNewSample
-      ? Math.max((sampleTime - previousTraffic.sampleTime) / 1000, 0.25)
-      : 1;
 
     if (previousTraffic && !hasNewSample) {
       panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
-      if (!data.connected) resetTraffic();
       return;
     }
 
+    if (!previousTraffic) {
+      previousTraffic = { sampleTime: sampleTime, values: current };
+      resetTraffic();
+      return;
+    }
+
+    var elapsed = Math.max((sampleTime - previousTraffic.sampleTime) / 1000, 0.25);
+
     function delta(key) {
-      if (!previousTraffic || !hasNewSample || current[key] < previousTraffic.values[key]) return 0;
+      if (!hasNewSample || current[key] < previousTraffic.values[key]) return 0n;
       return current[key] - previousTraffic.values[key];
     }
 
-    setText("tailnet-rx-rate", formatBytes(delta("tailscale_rx_bytes") / elapsed));
+    setText("tailnet-rx-rate", formatBytes(Number(delta("tailscale_rx_bytes")) / elapsed));
     setText("tailnet-rx-packets", formatPackets(current.tailscale_rx_packets));
-    setText("vpn-tx-rate", formatBytes(delta("vpn_tx_bytes") / elapsed));
+    setText("vpn-tx-rate", formatBytes(Number(delta("vpn_tx_bytes")) / elapsed));
     setText("vpn-tx-packets", formatPackets(current.vpn_tx_packets));
-    setText("vpn-rx-rate", formatBytes(delta("vpn_rx_bytes") / elapsed));
+    setText("vpn-rx-rate", formatBytes(Number(delta("vpn_rx_bytes")) / elapsed));
     setText("vpn-rx-packets", formatPackets(current.vpn_rx_packets));
-    setText("tailnet-tx-rate", formatBytes(delta("tailscale_tx_bytes") / elapsed));
+    setText("tailnet-tx-rate", formatBytes(Number(delta("tailscale_tx_bytes")) / elapsed));
     setText("tailnet-tx-packets", formatPackets(current.tailscale_tx_packets));
 
     panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
-    if (previousTraffic && hasNewSample && data.connected) {
-      if (delta("tailscale_rx_packets") > 0) panel.classList.add("flow-ingress");
-      if (delta("vpn_tx_packets") > 0) panel.classList.add("flow-egress");
-      if (delta("vpn_rx_packets") > 0 || delta("tailscale_tx_packets") > 0) panel.classList.add("flow-return");
-    }
+    if (delta("tailscale_rx_packets") > 0n) panel.classList.add("flow-ingress");
+    if (delta("vpn_tx_packets") > 0n) panel.classList.add("flow-egress");
+    if (delta("vpn_rx_packets") > 0n || delta("tailscale_tx_packets") > 0n) panel.classList.add("flow-return");
     previousTraffic = { sampleTime: sampleTime, values: current };
   }
 
@@ -160,9 +176,11 @@
   }
 
   function initStatusPolling() {
-    if (!document.getElementById("schematic-panel")) return;
+    var panel = document.getElementById("schematic-panel");
+    if (!panel) return;
     refreshStatus();
-    setInterval(refreshStatus, 2000);
+    var interval = Number(panel.dataset.pollInterval) || 2;
+    setInterval(refreshStatus, Math.max(interval, 1) * 1000);
   }
 
   function initVpnTypeToggle() {

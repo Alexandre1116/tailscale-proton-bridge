@@ -33,7 +33,7 @@
     </div>
   </div>
 
-  <section class="schematic-panel traffic-panel" id="schematic-panel" data-status-url="{{ url_for('api_status') }}">
+  <section class="schematic-panel traffic-panel" id="schematic-panel" data-status-url="{{ url_for('api_status') }}" data-poll-interval="{{ status_update_interval }}">
     <div class="panel-heading">
       <div>
         <span class="eyebrow">Live traffic</span>

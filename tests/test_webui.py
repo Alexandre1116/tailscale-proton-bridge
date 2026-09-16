@@ -53,7 +53,7 @@ def test_status_ignores_stale_traffic_when_health_is_disconnected(client, tmp_pa
     assert response.status_code == 200
     data = response.get_json()
     assert data["connected"] is False
-    assert data["vpn_tx_bytes"] == 0
+    assert data["vpn_tx_bytes"] == "0"
     assert data["traffic_updated"] is None
 
 
@@ -73,7 +73,7 @@ def test_status_keeps_health_state_when_live_traffic_updates_separately(client, 
     assert response.status_code == 200
     data = response.get_json()
     assert data["connected"] is True
-    assert data["vpn_tx_bytes"] == 1234
+    assert data["vpn_tx_bytes"] == "1234"
     assert data["traffic_updated"] == "traffic-time"
 
 

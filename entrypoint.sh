@@ -117,14 +117,14 @@ write_traffic() {
     local traffic_tmp="${TRAFFIC_FILE}.tmp.${BASHPID:-$$}"
     cat > "$traffic_tmp" <<EOF
 {
-  "tailscale_rx_bytes": ${ts_rx_bytes},
-  "tailscale_tx_bytes": ${ts_tx_bytes},
-  "tailscale_rx_packets": ${ts_rx_packets},
-  "tailscale_tx_packets": ${ts_tx_packets},
-  "vpn_rx_bytes": ${vpn_rx_bytes},
-  "vpn_tx_bytes": ${vpn_tx_bytes},
-  "vpn_rx_packets": ${vpn_rx_packets},
-  "vpn_tx_packets": ${vpn_tx_packets},
+  "tailscale_rx_bytes": "${ts_rx_bytes}",
+  "tailscale_tx_bytes": "${ts_tx_bytes}",
+  "tailscale_rx_packets": "${ts_rx_packets}",
+  "tailscale_tx_packets": "${ts_tx_packets}",
+  "vpn_rx_bytes": "${vpn_rx_bytes}",
+  "vpn_tx_bytes": "${vpn_tx_bytes}",
+  "vpn_rx_packets": "${vpn_rx_packets}",
+  "vpn_tx_packets": "${vpn_tx_packets}",
   "traffic_updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
@@ -437,7 +437,7 @@ VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
 STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
 case "$STATUS_UPDATE_INTERVAL" in
-    ''|*[!0-9]*|0)
+    ''|*[!0-9]*|0*)
         echo "Erro: STATUS_UPDATE_INTERVAL deve ser um inteiro positivo." >&2
         exit 1
         ;;
@@ -462,6 +462,12 @@ check_vpn_connectivity() {
 }
 
 while true; do
+    if ! kill -0 "$STATUS_WRITER_PID" 2>/dev/null; then
+        echo "Erro: o escritor de telemetria parou inesperadamente. A reiniciar o container..." >&2
+        write_status "false"
+        exit 1
+    fi
+
     # Verificar se o daemon do Tailscale continua a correr
     if ! kill -0 "$TAILSCALED_PID" 2>/dev/null; then
         echo "Erro: O daemon do Tailscale (tailscaled) parou de responder. A reiniciar container..."
