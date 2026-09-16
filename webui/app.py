@@ -40,8 +40,10 @@ try:
     if not re.fullmatch(r"[1-9][0-9]*", STATUS_UPDATE_INTERVAL_VALUE):
         raise ValueError
     STATUS_UPDATE_INTERVAL = int(STATUS_UPDATE_INTERVAL_VALUE)
+    if STATUS_UPDATE_INTERVAL > 2147483:
+        raise ValueError
 except ValueError as exc:
-    raise RuntimeError("STATUS_UPDATE_INTERVAL must be a positive integer") from exc
+    raise RuntimeError("STATUS_UPDATE_INTERVAL must be a positive integer no greater than 2147483") from exc
 if WEBUI_ACCESS_MODE == "tailnet" and not WEBUI_ALLOWED_CIDRS:
     WEBUI_ALLOWED_CIDRS = "100.64.0.0/10,fd7a:115c:a1e0::/48"
 

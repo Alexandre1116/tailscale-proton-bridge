@@ -10,6 +10,23 @@ echo "============================================="
 
 WG_RUNNING_CONF="/tmp/protonvpn.conf"
 STATUS_WRITER_PID=""
+STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
+
+# Validate this before starting VPN or Tailscale services. The upper bound
+# keeps the value safe for browser timers (which use signed 32-bit delays).
+case "$STATUS_UPDATE_INTERVAL" in
+    ''|*[!0-9]*|0*)
+        echo "Error: STATUS_UPDATE_INTERVAL must be a positive integer." >&2
+        exit 1
+        ;;
+esac
+if [ "${#STATUS_UPDATE_INTERVAL}" -gt 7 ] || {
+    [ "${#STATUS_UPDATE_INTERVAL}" -eq 7 ] &&
+    [ "$STATUS_UPDATE_INTERVAL" -gt 2147483 ]
+}; then
+    echo "Error: STATUS_UPDATE_INTERVAL must not exceed 2147483 seconds." >&2
+    exit 1
+fi
 
 # Função de limpeza para encerramento gracioso
 cleanup() {
@@ -433,13 +450,6 @@ echo "=========================================================="
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
 VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
-STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
-case "$STATUS_UPDATE_INTERVAL" in
-    ''|*[!0-9]*|0*)
-        echo "Erro: STATUS_UPDATE_INTERVAL deve ser um inteiro positivo." >&2
-        exit 1
-        ;;
-esac
 write_status "true"
 vpn_failures=0
 

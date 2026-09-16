@@ -193,8 +193,9 @@
     var panel = document.getElementById("schematic-panel");
     if (!panel) return;
     refreshStatus();
-    var interval = Number(panel.dataset.pollInterval) || 2;
-    setInterval(refreshStatus, Math.max(interval, 1) * 1000);
+    var interval = Number(panel.dataset.pollInterval);
+    if (!Number.isSafeInteger(interval) || interval < 1 || interval > 2147483) interval = 2;
+    setInterval(refreshStatus, interval * 1000);
   }
 
   function initVpnTypeToggle() {
