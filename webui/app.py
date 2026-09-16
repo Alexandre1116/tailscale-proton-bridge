@@ -3,8 +3,8 @@
 
 Lets users edit the project's .env file and upload VPN configuration files
 (WireGuard/OpenVPN) without SSH access to the host. It does not control the
-bridge container because it has no access to the Docker socket. Restart the
-container manually after saving changes.
+bridge container because it has no access to the Docker socket. Restart both
+containers manually after saving changes.
 """
 import hmac
 import json

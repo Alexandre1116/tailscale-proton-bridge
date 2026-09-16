@@ -430,8 +430,6 @@ echo "IMPORTANTE: Lembre-se de ir ao painel do Tailscale (Tailscale Admin Consol
 echo "e aprovar este dispositivo como um Exit Node!"
 echo "=========================================================="
 
-write_status "true"
-
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
 VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
@@ -442,6 +440,7 @@ case "$STATUS_UPDATE_INTERVAL" in
         exit 1
         ;;
 esac
+write_status "true"
 vpn_failures=0
 
 status_writer() {

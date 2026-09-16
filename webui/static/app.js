@@ -71,6 +71,11 @@
 
     if (previousTraffic && !hasNewSample) {
       panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
+      var intervalSeconds = Number(panel.dataset.pollInterval) || 2;
+      if (Date.now() - sampleTime > Math.max(intervalSeconds * 1000, 2500)) {
+        previousTraffic = null;
+        resetTraffic();
+      }
       return;
     }
 
@@ -149,7 +154,13 @@
     if (!el) return;
     if (statusRequestInFlight) return;
     statusRequestInFlight = true;
-    fetch(el.dataset.statusUrl, { credentials: "same-origin" })
+    var controller = typeof AbortController === "function" ? new AbortController() : null;
+    var timeoutId = setTimeout(function () {
+      if (controller) controller.abort();
+    }, 10000);
+    var fetchOptions = { credentials: "same-origin" };
+    if (controller) fetchOptions.signal = controller.signal;
+    fetch(el.dataset.statusUrl, fetchOptions)
       .then(function (res) {
         if (!res.ok) throw new Error("status request failed");
         return res.json();
@@ -169,8 +180,11 @@
         var stateEl = document.getElementById("tb-state");
         if (stateEl) stateEl.className = "state-off";
         el.classList.add("stale");
+        var strip = document.getElementById("action-strip");
+        if (strip) strip.classList.remove("show");
       })
       .then(function () {
+        clearTimeout(timeoutId);
         statusRequestInFlight = false;
       });
   }
