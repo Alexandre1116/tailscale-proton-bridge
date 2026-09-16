@@ -42,6 +42,7 @@
     var now = Date.now();
     var sampleTime = Date.parse(data.traffic_updated || data.last_updated || "");
     if (!Number.isFinite(sampleTime)) sampleTime = now;
+    if (previousTraffic && sampleTime < previousTraffic.sampleTime) return;
     var hasNewSample = !previousTraffic || sampleTime > previousTraffic.sampleTime;
     var current = {
       tailscale_rx_bytes: numberValue(data.tailscale_rx_bytes),
@@ -56,6 +57,12 @@
     var elapsed = previousTraffic && hasNewSample
       ? Math.max((sampleTime - previousTraffic.sampleTime) / 1000, 0.25)
       : 1;
+
+    if (previousTraffic && !hasNewSample) {
+      panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
+      if (!data.connected) resetTraffic();
+      return;
+    }
 
     function delta(key) {
       if (!previousTraffic || !hasNewSample || current[key] < previousTraffic.values[key]) return 0;

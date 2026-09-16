@@ -436,6 +436,12 @@ VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
 VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
 STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
+case "$STATUS_UPDATE_INTERVAL" in
+    ''|*[!0-9]*|0)
+        echo "Erro: STATUS_UPDATE_INTERVAL deve ser um inteiro positivo." >&2
+        exit 1
+        ;;
+esac
 vpn_failures=0
 
 status_writer() {

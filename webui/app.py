@@ -36,7 +36,9 @@ WEBUI_ACCESS_MODE = os.environ.get("WEBUI_ACCESS_MODE", "all").lower()
 WEBUI_BIND_ADDRESS = os.environ.get("WEBUI_BIND_ADDRESS", "0.0.0.0")
 WEBUI_ALLOWED_CIDRS = os.environ.get("WEBUI_ALLOWED_CIDRS", "").strip()
 try:
-    STATUS_UPDATE_INTERVAL = max(1, int(os.environ.get("STATUS_UPDATE_INTERVAL", "2")))
+    STATUS_UPDATE_INTERVAL = int(os.environ.get("STATUS_UPDATE_INTERVAL", "2"))
+    if STATUS_UPDATE_INTERVAL < 1:
+        raise ValueError
 except ValueError as exc:
     raise RuntimeError("STATUS_UPDATE_INTERVAL must be a positive integer") from exc
 if WEBUI_ACCESS_MODE == "tailnet" and not WEBUI_ALLOWED_CIDRS:
@@ -403,8 +405,8 @@ def save():
     if is_wizard:
         flash("Initial setup is complete. Run 'docker compose up -d --build' to apply it.", "success")
     else:
-        flash("Configuration saved. Restart the bridge container to apply the changes "
-              "(docker compose up -d --build vpn-tailscale-bridge).", "success")
+        flash("Configuration saved. Restart both containers to apply the changes "
+              "(docker compose up -d --build vpn-tailscale-bridge webui).", "success")
     return redirect(url_for("index", skip_wizard=1))
 
 

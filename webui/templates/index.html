@@ -4,7 +4,7 @@
 
 <div class="panel config-panel">
   <h2>Configuration</h2>
-  <p class="lede">Changes made here update files on disk. Restart the bridge after saving to apply them.</p>
+  <p class="lede">Changes made here update files on disk. Restart both containers after saving to apply them.</p>
 
   <form method="post" action="{{ url_for('save') }}" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -108,10 +108,10 @@
   <h2>Apply changes</h2>
   <p class="lede" style="margin-bottom:0">
     Saving here only updates <code>.env</code> and <code>./vpn</code>. The bridge
-    reads these values when the container starts. Run this on the host:
+    and Web UI read these values when their containers start. Run this on the host:
   </p>
   <p style="font-family: var(--font-mono); font-size: 0.85rem; margin: 10px 0 0;">
-    docker compose up -d --build vpn-tailscale-bridge
+    docker compose up -d --build vpn-tailscale-bridge webui
   </p>
 </div>
 
