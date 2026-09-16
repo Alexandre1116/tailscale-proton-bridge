@@ -1,9 +1,12 @@
 <!doctype html>
-<html lang="pt">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{% block title %}Ponte Tailscale &harr; Proton VPN{% endblock %}</title>
+<meta name="theme-color" content="#0c141a">
+<title>{% block title %}Tailscale &harr; Proton VPN Bridge{% endblock %}</title>
+<link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='logo.svg') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -11,66 +14,121 @@
 
   <div class="masthead">
     <div class="brand">
-      <svg class="brand-mark" viewBox="0 0 34 34" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <rect x="1" y="1" width="32" height="32" fill="none" stroke="var(--blue-line)"/>
-        <path d="M6 24 H14 V10 H28" fill="none" stroke="var(--ink-dim)" stroke-width="1.6"/>
-        <circle cx="6" cy="24" r="2.4" fill="var(--ink-dim)"/>
-        <circle cx="28" cy="10" r="2.4" fill="var(--signal)"/>
-      </svg>
+      <img class="brand-mark" src="{{ url_for('static', filename='logo.svg') }}" alt="">
       <div class="brand-text">
         <h1>Tailscale &harr; Proton VPN</h1>
-        <p>PONTE / EXIT NODE</p>
+        <p>BRIDGE / EXIT NODE</p>
       </div>
     </div>
 
     <div class="title-block">
       <dl>
-        <dt>Protocolo</dt>
+        <dt>Protocol</dt>
         <dd id="tb-proto">{{ (vpn_type or '-')|upper }}</dd>
       </dl>
       <dl>
-        <dt>Estado</dt>
-        <dd id="tb-state" class="state-off">A verificar</dd>
+        <dt>Status</dt>
+        <dd id="tb-state" class="state-off">Checking</dd>
       </dl>
     </div>
   </div>
 
-  <div class="schematic-panel" id="schematic-panel" data-status-url="{{ url_for('api_status') }}">
-    <svg class="schematic" viewBox="0 0 660 130" xmlns="http://www.w3.org/2000/svg" role="img"
-         aria-label="Diagrama do percurso do tráfego: Tailnet, Ponte, Proton VPN, Internet">
-      <path class="wire" d="M100,60 H260" />
-      <path class="wire" d="M380,60 H540" />
-      <path class="wire" d="M620,60 H645" stroke-dasharray="3 4" />
-
-      <circle class="pad" cx="100" cy="60" r="3"/>
-      <circle class="pad" cx="260" cy="60" r="3"/>
-      <circle class="pad" cx="380" cy="60" r="3"/>
-      <circle class="pad" cx="540" cy="60" r="3"/>
-
-      <rect class="node-box" x="40" y="42" width="60" height="36" />
-      <text class="node-label" x="70" y="95">TAILNET</text>
-
-      <rect class="node-box self" x="260" y="30" width="120" height="60" />
-      <text class="node-label" x="320" y="55">ESTA PONTE</text>
-      <text class="node-sub" x="320" y="70">{{ ts_hostname or 'protonvpn-bridge' }}</text>
-      <text class="node-sub ip" id="node-ip" x="320" y="82">sem ligação</text>
-
-      <rect class="node-box" x="540" y="42" width="80" height="36" />
-      <text class="node-label" x="580" y="95">PROTON VPN</text>
-
-      <text class="node-sub" x="655" y="95" text-anchor="end">NET</text>
-
-      <circle class="signal-dot" cy="60" r="4" />
-    </svg>
-    <div class="status-line">
-      <span id="status-detail-text">A verificar estado&hellip;</span>
+  <section class="schematic-panel traffic-panel" id="schematic-panel" data-status-url="{{ url_for('api_status') }}" data-poll-interval="{{ status_update_interval }}">
+    <div class="panel-heading">
+      <div>
+        <span class="eyebrow">Live traffic</span>
+        <h2>Packet path</h2>
+      </div>
+      <span class="live-badge"><span class="live-dot" aria-hidden="true"></span><span id="traffic-live-label">Collecting</span></span>
     </div>
-  </div>
+
+    <div class="traffic-graph-wrap">
+      <svg class="traffic-graph traffic-graph-desktop" viewBox="0 0 760 180" xmlns="http://www.w3.org/2000/svg" role="img"
+           aria-label="Traffic between the Tailnet, bridge and Proton VPN">
+        <path class="graph-line" d="M164 68 H292" />
+        <path class="graph-line" d="M468 68 H596" />
+        <path class="graph-line return-line" d="M596 116 H468" />
+        <path class="graph-line return-line" d="M292 116 H164" />
+
+        <rect class="graph-node" x="36" y="48" width="128" height="88" rx="8" />
+        <text class="graph-label" x="100" y="82">TAILNET</text>
+        <text class="graph-muted" x="100" y="104">in / out</text>
+
+        <rect class="graph-node graph-node-main" x="292" y="36" width="176" height="112" rx="10" />
+        <text class="graph-label" x="380" y="76">THIS BRIDGE</text>
+        <text class="graph-muted" x="380" y="98">{{ ts_hostname or 'protonvpn-bridge' }}</text>
+        <text class="graph-ip" id="node-ip" x="380" y="122">not connected</text>
+
+        <rect class="graph-node" x="596" y="48" width="128" height="88" rx="8" />
+        <text class="graph-label" x="660" y="82">PROTON VPN</text>
+        <text class="graph-muted" x="660" y="104">secure exit</text>
+
+        <circle class="traffic-dot dot-ingress" cx="164" cy="68" r="5" />
+        <circle class="traffic-dot dot-egress" cx="468" cy="68" r="5" />
+        <circle class="traffic-dot dot-return-vpn" cx="596" cy="116" r="5" />
+        <circle class="traffic-dot dot-return-tailnet" cx="292" cy="116" r="5" />
+      </svg>
+      <svg class="traffic-graph traffic-graph-mobile" viewBox="0 0 340 420" xmlns="http://www.w3.org/2000/svg" role="img"
+           aria-label="Traffic between the Tailnet, bridge and Proton VPN">
+        <path class="graph-line" d="M145 90 V150" />
+        <path class="graph-line" d="M195 260 V330" />
+        <path class="graph-line return-line" d="M220 330 V260" />
+        <path class="graph-line return-line" d="M120 150 V90" />
+
+        <rect class="graph-node" x="50" y="20" width="240" height="70" rx="8" />
+        <text class="graph-label" x="170" y="50">TAILNET</text>
+        <text class="graph-muted" x="170" y="70">in / out</text>
+
+        <rect class="graph-node graph-node-main" x="30" y="150" width="280" height="110" rx="10" />
+        <text class="graph-label" x="170" y="190">THIS BRIDGE</text>
+        <text class="graph-muted" x="170" y="214">{{ ts_hostname or 'protonvpn-bridge' }}</text>
+        <text class="graph-ip" id="node-ip-mobile" x="170" y="238">not connected</text>
+
+        <rect class="graph-node" x="50" y="330" width="240" height="70" rx="8" />
+        <text class="graph-label" x="170" y="360">PROTON VPN</text>
+        <text class="graph-muted" x="170" y="380">secure exit</text>
+
+        <circle class="traffic-dot dot-ingress" cx="145" cy="90" r="5" />
+        <circle class="traffic-dot dot-egress" cx="195" cy="260" r="5" />
+        <circle class="traffic-dot dot-return-vpn" cx="220" cy="330" r="5" />
+        <circle class="traffic-dot dot-return-tailnet" cx="120" cy="150" r="5" />
+      </svg>
+    </div>
+
+    <div class="traffic-stats">
+      <div class="traffic-stat">
+        <span>Tailnet in</span>
+        <strong id="tailnet-rx-rate">--</strong>
+        <small id="tailnet-rx-packets">-- packets</small>
+      </div>
+      <div class="traffic-stat traffic-stat-highlight">
+        <span>VPN out</span>
+        <strong id="vpn-tx-rate">--</strong>
+        <small id="vpn-tx-packets">-- packets</small>
+      </div>
+      <div class="traffic-stat">
+        <span>VPN in</span>
+        <strong id="vpn-rx-rate">--</strong>
+        <small id="vpn-rx-packets">-- packets</small>
+      </div>
+      <div class="traffic-stat">
+        <span>Tailnet out</span>
+        <strong id="tailnet-tx-rate">--</strong>
+        <small id="tailnet-tx-packets">-- packets</small>
+      </div>
+    </div>
+
+    <div class="status-line">
+      <span id="status-detail-text">Checking status&hellip;</span>
+      <span id="traffic-sample">Sampling every {{ status_update_interval }} s</span>
+    </div>
+    <span class="sr-only" id="connection-announcement" role="status" aria-live="polite"></span>
+  </section>
 
   <div class="action-strip" id="action-strip">
     <span class="dot" aria-hidden="true"></span>
-    <p>É necessário aprovar este dispositivo na sua conta Tailscale para concluir a ligação.</p>
-    <a class="btn" id="action-strip-link" href="#" target="_blank" rel="noopener">Abrir link de autenticação</a>
+    <p>This device needs approval in your Tailscale account before it can connect.</p>
+    <a class="btn" id="action-strip-link" href="#" target="_blank" rel="noopener">Open authentication link</a>
   </div>
 
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -83,7 +141,7 @@
 
   {% block content %}{% endblock %}
 
-  <footer class="page-footer">Tailscale &harr; Proton VPN &mdash; ponte de exit node self-hosted</footer>
+  <footer class="page-footer">Tailscale &harr; Proton VPN. Self-hosted exit node.</footer>
 </div>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 {% block scripts %}{% endblock %}

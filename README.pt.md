@@ -143,14 +143,9 @@ Além do terminal, o projeto inclui uma interface web intuitiva para gerir a bri
 2. **Autenticação**: Defina `WEBUI_USERNAME`/`WEBUI_PASSWORD` no `.env` antes de iniciar a Web UI. A password vazia impede o arranque.
 3. **Assistente Inicial**: Na primeira utilização, a Web UI abre automaticamente um assistente de 4 passos com suporte para arrastar e largar os ficheiros de VPN.
 4. **Link de Login Manual**: Se não definir `TS_AUTHKEY`, o link para autenticar o Tailscale surge em destaque diretamente na Web UI.
-5. **Aplicação de Alterações**: Por segurança (para não expor o socket do Docker à Web UI), após gravar alterações no painel basta correr:
+5. **Aplicação de Alterações**: Por segurança (para não expor o socket do Docker à Web UI), após gravar alterações no painel recrie ambos os serviços:
    ```bash
-   docker compose up -d --build vpn-tailscale-bridge
-   ```
-   Se alterou o protocolo, o bind address ou a origem da password da Web UI,
-   recrie a Web UI:
-   ```bash
-   docker compose up -d --build webui
+   docker compose up -d --build vpn-tailscale-bridge webui
    ```
 
 ---

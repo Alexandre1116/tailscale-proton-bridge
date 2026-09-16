@@ -1,57 +1,57 @@
 {% extends "base.html" %}
-{% block title %}Configuração &mdash; Tailscale &harr; Proton VPN{% endblock %}
+{% block title %}Configuration &mdash; Tailscale &harr; Proton VPN{% endblock %}
 {% block content %}
 
-<div class="panel">
-  <h2>Configuração</h2>
-  <p class="lede">Alterações aqui só atualizam ficheiros em disco. Depois de gravar, reinicie a ponte para as aplicar (ver nota em baixo).</p>
+<div class="panel config-panel">
+  <h2>Configuration</h2>
+  <p class="lede">Changes made here update files on disk. Restart both containers after saving to apply them.</p>
 
   <form method="post" action="{{ url_for('save') }}" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
     <fieldset>
-      <legend>Protocolo VPN</legend>
+      <legend>VPN protocol</legend>
       <div class="radio-group">
-        <label><input type="radio" name="vpn_type" value="auto" {% if vpn_type == 'auto' %}checked{% endif %}> Automático</label>
+        <label><input type="radio" name="vpn_type" value="auto" {% if vpn_type == 'auto' %}checked{% endif %}> Automatic</label>
         <label><input type="radio" name="vpn_type" value="wireguard" {% if vpn_type == 'wireguard' %}checked{% endif %}> WireGuard</label>
         <label><input type="radio" name="vpn_type" value="openvpn" {% if vpn_type == 'openvpn' %}checked{% endif %}> OpenVPN</label>
       </div>
 
       <div class="vpn-block" data-vpn="wireguard">
-        <label>Ficheiro WireGuard (protonvpn.conf)</label>
+        <label>WireGuard file (protonvpn.conf)</label>
         <div class="dropzone">
-          <span class="dz-label">Arraste o ficheiro .conf para aqui, ou clique para escolher</span>
+          <span class="dz-label">Drop the .conf file here, or click to choose it</span>
           <input type="file" name="wg_conf" accept=".conf">
         </div>
         <div class="file-status {{ 'ok' if files_present.wireguard else 'missing' }}">
-          {{ 'protonvpn.conf presente.' if files_present.wireguard else 'Ainda sem ficheiro carregado.' }}
+          {{ 'protonvpn.conf is present.' if files_present.wireguard else 'No file uploaded yet.' }}
         </div>
       </div>
 
       <div class="vpn-block" data-vpn="openvpn">
-        <label>Ficheiro OpenVPN (protonvpn.ovpn)</label>
+        <label>OpenVPN file (protonvpn.ovpn)</label>
         <div class="dropzone">
-          <span class="dz-label">Arraste o ficheiro .ovpn para aqui, ou clique para escolher</span>
+          <span class="dz-label">Drop the .ovpn file here, or click to choose it</span>
           <input type="file" name="ovpn_conf" accept=".ovpn">
         </div>
         <div class="file-status {{ 'ok' if files_present.openvpn_conf else 'missing' }}">
-          {{ 'protonvpn.ovpn presente.' if files_present.openvpn_conf else 'Ainda sem ficheiro carregado.' }}
+          {{ 'protonvpn.ovpn is present.' if files_present.openvpn_conf else 'No file uploaded yet.' }}
         </div>
 
-        <label>Ficheiro de credenciais (credentials.txt, opcional)</label>
+        <label>Credentials file (credentials.txt, optional)</label>
         <div class="dropzone">
-          <span class="dz-label">Arraste o ficheiro .txt para aqui, ou clique para escolher</span>
+          <span class="dz-label">Drop the .txt file here, or click to choose it</span>
           <input type="file" name="ovpn_creds" accept=".txt">
         </div>
         <div class="file-status {{ 'ok' if files_present.openvpn_creds else 'missing' }}">
-          {{ 'credentials.txt presente.' if files_present.openvpn_creds else 'Sem ficheiro - preencha utilizador/palavra-passe abaixo.' }}
+          {{ 'credentials.txt is present.' if files_present.openvpn_creds else 'No file. Enter a username and password below.' }}
         </div>
 
-        <label>Utilizador OpenVPN</label>
+        <label>OpenVPN username</label>
         <input type="text" name="protonvpn_user" value="{{ env.PROTONVPN_USER }}" autocomplete="off">
 
-        <label>Palavra-passe OpenVPN
-          <span class="hint">{{ '(definida — deixe em branco para manter)' if secrets_set.PROTONVPN_PASSWORD else '' }}</span>
+        <label>OpenVPN password
+          <span class="hint">{{ '(set. Leave blank to keep it)' if secrets_set.PROTONVPN_PASSWORD else '' }}</span>
         </label>
         <input type="password" name="protonvpn_password" autocomplete="new-password" placeholder="{{ '••••••••' if secrets_set.PROTONVPN_PASSWORD else '' }}">
       </div>
@@ -59,59 +59,59 @@
 
     <fieldset>
       <legend>Tailscale</legend>
-      <label>Nome do dispositivo (TS_HOSTNAME)</label>
+      <label>Device name (TS_HOSTNAME)</label>
       <input type="text" name="ts_hostname" value="{{ env.TS_HOSTNAME }}" placeholder="protonvpn-bridge">
 
       <label>Auth Key (TS_AUTHKEY)
-        <span class="hint">{{ '(definida — deixe em branco para manter)' if secrets_set.TS_AUTHKEY else '(em branco = ligação por link de login)' }}</span>
+        <span class="hint">{{ '(set. Leave blank to keep it)' if secrets_set.TS_AUTHKEY else '(blank = sign in with a login link)' }}</span>
       </label>
       <input type="password" name="ts_authkey" autocomplete="new-password" placeholder="{{ 'tskey-auth-••••••••' if secrets_set.TS_AUTHKEY else 'tskey-auth-...' }}">
 
-      <label>Argumentos extra do 'tailscale up' (opcional)</label>
+      <label>Extra 'tailscale up' arguments (optional)</label>
       <input type="text" name="ts_extra_args" value="{{ env.TS_EXTRA_ARGS }}">
     </fieldset>
 
     <fieldset>
       <legend>Web UI</legend>
-      <label>Utilizador</label>
+      <label>Username</label>
       <input type="text" name="webui_username" value="{{ env.WEBUI_USERNAME or 'admin' }}" autocomplete="username">
 
-      <label>Palavra-passe
-        <span class="hint">(definida — deixe em branco para manter)</span>
+      <label>Password
+        <span class="hint">(set. Leave blank to keep it)</span>
       </label>
       <input type="password" name="webui_password" autocomplete="new-password">
 
-      <label>Protocolo</label>
+      <label>Protocol</label>
       <div class="radio-group">
         <label><input type="radio" name="webui_protocol" value="http" {% if env.WEBUI_PROTOCOL != 'https' %}checked{% endif %}> HTTP</label>
         <label><input type="radio" name="webui_protocol" value="https" {% if env.WEBUI_PROTOCOL == 'https' %}checked{% endif %}> HTTPS</label>
       </div>
-      <p class="hint">HTTPS requer <code>webui/certs/fullchain.pem</code> e <code>privkey.pem</code>.</p>
+      <p class="hint">HTTPS requires <code>webui/certs/fullchain.pem</code> and <code>privkey.pem</code>.</p>
 
-      <label>Acesso</label>
+      <label>Access</label>
       <div class="radio-group">
-        <label><input type="radio" name="webui_access_mode" value="all" {% if env.WEBUI_ACCESS_MODE != 'tailnet' %}checked{% endif %}> Todas as interfaces</label>
-        <label><input type="radio" name="webui_access_mode" value="tailnet" {% if env.WEBUI_ACCESS_MODE == 'tailnet' %}checked{% endif %}> Apenas Tailnet</label>
+        <label><input type="radio" name="webui_access_mode" value="all" {% if env.WEBUI_ACCESS_MODE != 'tailnet' %}checked{% endif %}> All interfaces</label>
+        <label><input type="radio" name="webui_access_mode" value="tailnet" {% if env.WEBUI_ACCESS_MODE == 'tailnet' %}checked{% endif %}> Tailnet only</label>
       </div>
-      <label>IP de bind do host</label>
-      <input type="text" name="webui_bind_address" value="{{ env.WEBUI_BIND_ADDRESS or '0.0.0.0' }}" placeholder="0.0.0.0 ou 100.x.y.z">
+      <label>Host bind address</label>
+      <input type="text" name="webui_bind_address" value="{{ env.WEBUI_BIND_ADDRESS or '0.0.0.0' }}" placeholder="0.0.0.0 or 100.x.y.z">
     </fieldset>
 
     <div class="actions">
-      <button type="submit" class="btn">Gravar configuração</button>
-      <a class="btn ghost" href="{{ url_for('wizard') }}">Executar assistente novamente</a>
+      <button type="submit" class="btn">Save configuration</button>
+      <a class="btn ghost" href="{{ url_for('wizard') }}">Run setup wizard again</a>
     </div>
   </form>
 </div>
 
 <div class="panel">
-  <h2>Aplicar alterações</h2>
+  <h2>Apply changes</h2>
   <p class="lede" style="margin-bottom:0">
-    Gravar aqui só atualiza o <code>.env</code> e a pasta <code>./vpn</code>. O container da
-    ponte só relê estes valores quando é recriado. Depois de gravar, execute no host:
+    Saving here only updates <code>.env</code> and <code>./vpn</code>. The bridge
+    and Web UI read these values when their containers start. Run this on the host:
   </p>
   <p style="font-family: var(--font-mono); font-size: 0.85rem; margin: 10px 0 0;">
-    docker compose up -d --build vpn-tailscale-bridge
+    docker compose up -d --build vpn-tailscale-bridge webui
   </p>
 </div>
 

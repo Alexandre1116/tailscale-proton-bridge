@@ -9,11 +9,33 @@ echo "   Tailscale - Proton VPN Bridge Exit Node   "
 echo "============================================="
 
 WG_RUNNING_CONF="/tmp/protonvpn.conf"
+STATUS_WRITER_PID=""
+STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
+
+# Validate this before starting VPN or Tailscale services. The upper bound
+# keeps the value safe for browser timers (which use signed 32-bit delays).
+case "$STATUS_UPDATE_INTERVAL" in
+    ''|*[!0-9]*|0*)
+        echo "Error: STATUS_UPDATE_INTERVAL must be a positive integer." >&2
+        exit 1
+        ;;
+esac
+if [ "${#STATUS_UPDATE_INTERVAL}" -gt 7 ] || {
+    [ "${#STATUS_UPDATE_INTERVAL}" -eq 7 ] &&
+    [ "$STATUS_UPDATE_INTERVAL" -gt 2147483 ]
+}; then
+    echo "Error: STATUS_UPDATE_INTERVAL must not exceed 2147483 seconds." >&2
+    exit 1
+fi
 
 # Função de limpeza para encerramento gracioso
 cleanup() {
     echo "Sinal de paragem recebido. A encerrar serviços..."
+    if [ -n "$STATUS_WRITER_PID" ]; then
+        kill -TERM "$STATUS_WRITER_PID" 2>/dev/null || true
+    fi
     write_status "false" 2>/dev/null || true
+    rm -f "$TRAFFIC_FILE" 2>/dev/null || true
     if [ "$VPN_MODE" = "wireguard" ]; then
         echo "A desligar interface WireGuard..."
         wg-quick down "$WG_RUNNING_CONF" 2>/dev/null || wg-quick down protonvpn 2>/dev/null || true
@@ -36,6 +58,7 @@ trap cleanup SIGTERM SIGINT
 # 0. Estado partilhado (lido pela Web UI através de um volume Docker)
 STATUS_DIR="/var/run/bridge-status"
 STATUS_FILE="$STATUS_DIR/status.json"
+TRAFFIC_FILE="$STATUS_DIR/traffic.json"
 mkdir -p "$STATUS_DIR"
 read_secret_file() {
     if [ -z "${1:-}" ] || [ ! -r "$1" ]; then
@@ -62,7 +85,7 @@ write_status() {
     if [ "$connected" = "true" ]; then
         ts_ip=$(tailscale ip -4 2>/dev/null | head -n1)
     fi
-    local status_tmp="${STATUS_FILE}.tmp.$$"
+    local status_tmp="${STATUS_FILE}.tmp.${BASHPID:-$$}"
     cat > "$status_tmp" <<EOF
 {
   "vpn_mode": "${VPN_MODE:-}",
@@ -80,6 +103,55 @@ EOF
     mv -f "$status_tmp" "$STATUS_FILE"
 }
 
+interface_stat() {
+    local interface="$1"
+    local stat="$2"
+    local path="/sys/class/net/${interface}/statistics/${stat}"
+    if [ -n "$interface" ] && [ -r "$path" ]; then
+        cat "$path"
+    else
+        echo 0
+    fi
+}
+
+write_traffic() {
+    local ts_rx_bytes
+    local ts_tx_bytes
+    local ts_rx_packets
+    local ts_tx_packets
+    local vpn_rx_bytes
+    local vpn_tx_bytes
+    local vpn_rx_packets
+    local vpn_tx_packets
+    ts_rx_bytes=$(interface_stat "tailscale0" "rx_bytes")
+    ts_tx_bytes=$(interface_stat "tailscale0" "tx_bytes")
+    ts_rx_packets=$(interface_stat "tailscale0" "rx_packets")
+    ts_tx_packets=$(interface_stat "tailscale0" "tx_packets")
+    vpn_rx_bytes=$(interface_stat "${VPN_INTERFACE:-}" "rx_bytes")
+    vpn_tx_bytes=$(interface_stat "${VPN_INTERFACE:-}" "tx_bytes")
+    vpn_rx_packets=$(interface_stat "${VPN_INTERFACE:-}" "rx_packets")
+    vpn_tx_packets=$(interface_stat "${VPN_INTERFACE:-}" "tx_packets")
+    local traffic_tmp="${TRAFFIC_FILE}.tmp.${BASHPID:-$$}"
+    cat > "$traffic_tmp" <<EOF
+{
+  "tailscale_rx_bytes": "${ts_rx_bytes}",
+  "tailscale_tx_bytes": "${ts_tx_bytes}",
+  "tailscale_rx_packets": "${ts_rx_packets}",
+  "tailscale_tx_packets": "${ts_tx_packets}",
+  "vpn_rx_bytes": "${vpn_rx_bytes}",
+  "vpn_tx_bytes": "${vpn_tx_bytes}",
+  "vpn_rx_packets": "${vpn_rx_packets}",
+  "vpn_tx_packets": "${vpn_tx_packets}",
+  "traffic_updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+    chmod 0644 "$traffic_tmp"
+    mv -f "$traffic_tmp" "$TRAFFIC_FILE"
+}
+
+# Do not expose counters from a previous container run while the bridge is
+# booting or waiting for Tailscale/VPN authentication.
+rm -f "$TRAFFIC_FILE"
 write_status "false"
 
 # 1. Definir e Validar o Modo de VPN
@@ -375,12 +447,21 @@ echo "IMPORTANTE: Lembre-se de ir ao painel do Tailscale (Tailscale Admin Consol
 echo "e aprovar este dispositivo como um Exit Node!"
 echo "=========================================================="
 
-write_status "true"
-
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
 VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
+write_status "true"
 vpn_failures=0
+
+status_writer() {
+    while true; do
+        write_traffic
+        sleep "$STATUS_UPDATE_INTERVAL"
+    done
+}
+
+status_writer &
+STATUS_WRITER_PID=$!
 
 check_vpn_connectivity() {
     tailscale status >/dev/null 2>&1 || return 1
@@ -390,6 +471,12 @@ check_vpn_connectivity() {
 }
 
 while true; do
+    if ! kill -0 "$STATUS_WRITER_PID" 2>/dev/null; then
+        echo "Erro: o escritor de telemetria parou inesperadamente. A reiniciar o container..." >&2
+        write_status "false"
+        exit 1
+    fi
+
     # Verificar se o daemon do Tailscale continua a correr
     if ! kill -0 "$TAILSCALED_PID" 2>/dev/null; then
         echo "Erro: O daemon do Tailscale (tailscaled) parou de responder. A reiniciar container..."

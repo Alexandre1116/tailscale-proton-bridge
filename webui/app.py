@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Web UI de configuração para o Tailscale <-> Proton VPN Bridge.
+"""Configuration Web UI for the Tailscale <-> Proton VPN Bridge.
 
-Permite configurar o ficheiro .env do projeto e carregar os ficheiros de
-configuração da VPN (WireGuard/OpenVPN) sem precisar de aceder ao host por
-SSH. Não controla o container do bridge diretamente (não tem acesso ao
-socket do Docker) por razões de segurança - depois de gravar alterações,
-o utilizador deve reiniciar o container manualmente.
+Lets users edit the project's .env file and upload VPN configuration files
+(WireGuard/OpenVPN) without SSH access to the host. It does not control the
+bridge container because it has no access to the Docker socket. Restart both
+containers manually after saving changes.
 """
 import hmac
 import json
@@ -27,6 +26,7 @@ VPN_DIR = os.environ.get("VPN_DIR", "/data/vpn")
 WG_DIR = os.path.join(VPN_DIR, "wireguard")
 OVPN_DIR = os.path.join(VPN_DIR, "openvpn")
 STATUS_FILE = os.environ.get("STATUS_FILE", "/var/run/bridge-status/status.json")
+TRAFFIC_FILE = os.environ.get("TRAFFIC_FILE", "/var/run/bridge-status/traffic.json")
 
 WEBUI_USERNAME = os.environ.get("WEBUI_USERNAME", "admin")
 WEBUI_PASSWORD = os.environ.get("WEBUI_PASSWORD", "")
@@ -35,6 +35,15 @@ WEBUI_PROTOCOL = os.environ.get("WEBUI_PROTOCOL", "http").lower()
 WEBUI_ACCESS_MODE = os.environ.get("WEBUI_ACCESS_MODE", "all").lower()
 WEBUI_BIND_ADDRESS = os.environ.get("WEBUI_BIND_ADDRESS", "0.0.0.0")
 WEBUI_ALLOWED_CIDRS = os.environ.get("WEBUI_ALLOWED_CIDRS", "").strip()
+try:
+    STATUS_UPDATE_INTERVAL_VALUE = os.environ.get("STATUS_UPDATE_INTERVAL", "2")
+    if not re.fullmatch(r"[1-9][0-9]*", STATUS_UPDATE_INTERVAL_VALUE):
+        raise ValueError
+    STATUS_UPDATE_INTERVAL = int(STATUS_UPDATE_INTERVAL_VALUE)
+    if STATUS_UPDATE_INTERVAL > 2147483:
+        raise ValueError
+except ValueError as exc:
+    raise RuntimeError("STATUS_UPDATE_INTERVAL must be a positive integer no greater than 2147483") from exc
 if WEBUI_ACCESS_MODE == "tailnet" and not WEBUI_ALLOWED_CIDRS:
     WEBUI_ALLOWED_CIDRS = "100.64.0.0/10,fd7a:115c:a1e0::/48"
 
@@ -113,7 +122,7 @@ def require_auth(view):
         )
         if not valid:
             return (
-                "Autenticação necessária.",
+                "Authentication required.",
                 401,
                 {"WWW-Authenticate": 'Basic realm="Tailscale ProtonVPN Bridge"'},
             )
@@ -126,7 +135,7 @@ def load_env():
     values = {}
     if os.path.isdir(ENV_PATH):
         print(
-            f"AVISO: {ENV_PATH} é um diretório. Crie o ficheiro .env no host antes de montar.",
+            f"WARNING: {ENV_PATH} is a directory. Create the .env file on the host before mounting it.",
             flush=True,
         )
         return values
@@ -142,11 +151,10 @@ def load_env():
 
 
 def save_env(updates):
-    """Atualiza (ou adiciona) as chaves indicadas em updates no ficheiro .env,
-    preservando comentários e restantes linhas."""
+    """Update or add the keys in updates, preserving comments and other lines."""
     if os.path.isdir(ENV_PATH):
         raise RuntimeError(
-            f"{ENV_PATH} é um diretório no container. Certifique-se de que o ficheiro .env existe no host."
+            f"{ENV_PATH} is a directory in the container. Make sure the .env file exists on the host."
         )
 
     lines = []
@@ -192,19 +200,52 @@ def read_status():
         "connected": False,
         "tailscale_ip": "",
         "hostname": "",
+        "tailscale_rx_bytes": "0",
+        "tailscale_tx_bytes": "0",
+        "tailscale_rx_packets": "0",
+        "tailscale_tx_packets": "0",
+        "vpn_rx_bytes": "0",
+        "vpn_tx_bytes": "0",
+        "vpn_rx_packets": "0",
+        "vpn_tx_packets": "0",
+        "traffic_updated": None,
         "auth_url": "",
         "last_updated": None,
     }
-    if not os.path.isfile(STATUS_FILE):
-        return default
-    try:
-        with open(STATUS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            default.update(data)
-            return default
-    except (json.JSONDecodeError, OSError):
-        default["error"] = "não foi possível ler o estado"
-        return default
+    if os.path.isfile(STATUS_FILE):
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                default.update(json.load(f))
+        except (json.JSONDecodeError, OSError):
+            default["error"] = "could not read status"
+
+    traffic_keys = {
+        "tailscale_rx_bytes",
+        "tailscale_tx_bytes",
+        "tailscale_rx_packets",
+        "tailscale_tx_packets",
+        "vpn_rx_bytes",
+        "vpn_tx_bytes",
+        "vpn_rx_packets",
+        "vpn_tx_packets",
+        "traffic_updated",
+    }
+    for key in traffic_keys:
+        if key in default and key != "traffic_updated":
+            default[key] = str(default[key])
+    if default["connected"] and os.path.isfile(TRAFFIC_FILE):
+        try:
+            with open(TRAFFIC_FILE, "r", encoding="utf-8") as f:
+                traffic = json.load(f)
+            if not isinstance(traffic, dict):
+                raise ValueError("traffic status must be a JSON object")
+            for key in traffic_keys:
+                if key in traffic:
+                    default[key] = str(traffic[key]) if key != "traffic_updated" else traffic[key]
+        except (json.JSONDecodeError, OSError, TypeError, ValueError):
+            default["error"] = "could not read traffic status"
+
+    return default
 
 
 def save_upload(file_storage, dest_dir, dest_name):
@@ -247,6 +288,7 @@ def build_context(env_values, files_present):
         "csrf_token": csrf_token,
         "vpn_type": env_values.get("VPN_TYPE", "auto"),
         "ts_hostname": env_values.get("TS_HOSTNAME", ""),
+        "status_update_interval": STATUS_UPDATE_INTERVAL,
     }
 
 
@@ -260,7 +302,7 @@ def is_first_run(env_values, files_present):
 
 @app.route("/healthz", methods=["GET"])
 def healthz():
-    """Endpoint de verificação de integridade (Health Check) unauthenticated."""
+    """Unauthenticated health check endpoint."""
     return jsonify({"status": "healthy"}), 200
 
 
@@ -292,7 +334,7 @@ def save():
 
     token = request.form.get("csrf_token", "")
     if not token or not hmac.compare_digest(token, session.get("csrf", "")):
-        abort(400, "Token CSRF inválido. Recarregue a página e tente novamente.")
+        abort(400, "Invalid CSRF token. Reload the page and try again.")
 
     vpn_type = request.form.get("vpn_type", "auto").strip().lower()
     if vpn_type not in ("auto", "wireguard", "openvpn"):
@@ -300,7 +342,7 @@ def save():
 
     ts_hostname = request.form.get("ts_hostname", "").strip() or "protonvpn-bridge"
     if not HOSTNAME_RE.match(ts_hostname):
-        flash("Nome de dispositivo (TS_HOSTNAME) inválido - use apenas letras, números e hífens.", "error")
+        flash("Invalid device name (TS_HOSTNAME). Use only letters, numbers, and hyphens.", "error")
         return redirect(url_for(error_target))
 
     updates = {
@@ -315,18 +357,18 @@ def save():
     }
 
     if updates["WEBUI_PROTOCOL"] not in ("http", "https"):
-        flash("WEBUI_PROTOCOL deve ser http ou https.", "error")
+        flash("WEBUI_PROTOCOL must be http or https.", "error")
         return redirect(url_for(error_target))
     if updates["WEBUI_ACCESS_MODE"] not in ("all", "tailnet"):
-        flash("WEBUI_ACCESS_MODE deve ser all ou tailnet.", "error")
+        flash("WEBUI_ACCESS_MODE must be all or tailnet.", "error")
         return redirect(url_for(error_target))
     if updates["WEBUI_ACCESS_MODE"] == "tailnet" and updates["WEBUI_BIND_ADDRESS"] == "0.0.0.0":
-        flash("No modo tailnet, indique o IP Tailscale do host em WEBUI_BIND_ADDRESS.", "error")
+        flash("In tailnet mode, set WEBUI_BIND_ADDRESS to the host's Tailscale IP.", "error")
         return redirect(url_for(error_target))
 
     for key, value in updates.items():
         if "\n" in value or "\r" in value:
-            flash(f"Valor inválido em {key}.", "error")
+            flash(f"Invalid value for {key}.", "error")
             return redirect(url_for(error_target))
 
     if is_wizard:
@@ -344,38 +386,37 @@ def save():
     webui_password = request.form.get("webui_password", "").strip()
     if webui_password:
         if WEBUI_PASSWORD_FILE:
-            flash("A password vem de WEBUI_PASSWORD_FILE. Altere esse ficheiro no host.", "error")
+            flash("The Web UI password comes from WEBUI_PASSWORD_FILE. Change that file on the host.", "error")
             return redirect(url_for(error_target))
         updates["WEBUI_PASSWORD"] = webui_password
 
     for key, value in updates.items():
         if "\n" in value or "\r" in value:
-            flash(f"Valor inválido em {key}.", "error")
+            flash(f"Invalid value for {key}.", "error")
             return redirect(url_for(error_target))
 
     # Uploads de ficheiros de configuração
     wg_conf = request.files.get("wg_conf")
     if wg_conf and wg_conf.filename:
         save_upload(wg_conf, WG_DIR, "protonvpn.conf")
-        flash("Ficheiro WireGuard (protonvpn.conf) carregado.", "success")
+        flash("WireGuard file (protonvpn.conf) uploaded.", "success")
 
     ovpn_conf = request.files.get("ovpn_conf")
     if ovpn_conf and ovpn_conf.filename:
         save_upload(ovpn_conf, OVPN_DIR, "protonvpn.ovpn")
-        flash("Ficheiro OpenVPN (protonvpn.ovpn) carregado.", "success")
+        flash("OpenVPN file (protonvpn.ovpn) uploaded.", "success")
 
     ovpn_creds = request.files.get("ovpn_creds")
     if ovpn_creds and ovpn_creds.filename:
         save_upload(ovpn_creds, OVPN_DIR, "credentials.txt")
-        flash("Ficheiro de credenciais OpenVPN carregado.", "success")
+        flash("OpenVPN credentials file uploaded.", "success")
 
     save_env(updates)
     if is_wizard:
-        flash("Configuração inicial concluída. Arranque o container com "
-              "'docker compose up -d --build' para aplicar.", "success")
+        flash("Initial setup is complete. Run 'docker compose up -d --build' to apply it.", "success")
     else:
-        flash("Configuração gravada. Reinicie o container do bridge para aplicar as alterações "
-              "(docker compose up -d --build vpn-tailscale-bridge).", "success")
+        flash("Configuration saved. Restart both containers to apply the changes "
+              "(docker compose up -d --build vpn-tailscale-bridge webui).", "success")
     return redirect(url_for("index", skip_wizard=1))
 
 

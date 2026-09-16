@@ -8,7 +8,7 @@
 [![Proton VPN](https://img.shields.io/badge/Proton_VPN-WireGuard_%2F_OpenVPN-purple?logo=protonvpn)](https://protonvpn.com)
 [![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-brightgreen)](#)
 
-Current prerelease: [`v0.1.0-beta.2`](https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.1.0-beta.2)
+Current release: [`v0.1.0`](https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.1.0)
 
 Route all your private Tailscale network traffic through **Proton VPN** (including the **100% Free tier**) via a lightweight Docker exit node.
 
@@ -158,14 +158,9 @@ port, for example `http://<host-ip>:8080`:
 1. **Authentication**: Uses HTTP Basic Auth (`WEBUI_USERNAME` and `WEBUI_PASSWORD`). `WEBUI_PASSWORD` must be set before starting the Web UI.
 2. **First Run Wizard**: Automatically launches a 4-step wizard with drag-and-drop file upload for `.conf` or `.ovpn` files.
 3. **Manual Login Link**: If no `TS_AUTHKEY` is provided, a clickable login link appears dynamically in the header.
-4. **Apply Changes**: Because the Web UI does not access the Docker socket for security reasons, apply saved modifications with:
+4. **Apply Changes**: Because the Web UI does not access the Docker socket for security reasons, apply saved modifications by recreating both services:
    ```bash
-   docker compose up -d --build vpn-tailscale-bridge
-   ```
-   If you changed Web UI settings such as the protocol, bind address or
-   password source, recreate the Web UI instead:
-   ```bash
-   docker compose up -d --build webui
+   docker compose up -d --build vpn-tailscale-bridge webui
    ```
 
 ---
