@@ -113,7 +113,7 @@ input[type=text]:focus, input[type=password]:focus, select:focus { outline: 2px 
 .file-status.ok { color: var(--teal); }
 .file-status.missing { color: var(--orange-dark); }
 
-.btn { display: inline-block; padding: 10px 16px; border: 1px solid var(--orange); border-radius: 7px; background: var(--orange); color: #fffaf5; cursor: pointer; font-size: 0.72rem; font-weight: 750; letter-spacing: 0.05em; text-decoration: none; text-transform: uppercase; }
+.btn { display: inline-block; padding: 10px 16px; border: 1px solid var(--orange); border-radius: 7px; background: var(--orange); color: var(--navy); cursor: pointer; font-size: 0.72rem; font-weight: 750; letter-spacing: 0.05em; text-decoration: none; text-transform: uppercase; }
 .btn:hover { border-color: var(--orange-dark); background: var(--orange-dark); }
 .btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .btn.ghost { border-color: var(--line); background: transparent; color: var(--muted); }

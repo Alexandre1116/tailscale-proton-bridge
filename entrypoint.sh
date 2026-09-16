@@ -18,6 +18,7 @@ cleanup() {
         kill -TERM "$STATUS_WRITER_PID" 2>/dev/null || true
     fi
     write_status "false" 2>/dev/null || true
+    rm -f "$TRAFFIC_FILE" 2>/dev/null || true
     if [ "$VPN_MODE" = "wireguard" ]; then
         echo "A desligar interface WireGuard..."
         wg-quick down "$WG_RUNNING_CONF" 2>/dev/null || wg-quick down protonvpn 2>/dev/null || true
@@ -67,22 +68,6 @@ write_status() {
     if [ "$connected" = "true" ]; then
         ts_ip=$(tailscale ip -4 2>/dev/null | head -n1)
     fi
-    local ts_rx_bytes
-    local ts_tx_bytes
-    local ts_rx_packets
-    local ts_tx_packets
-    local vpn_rx_bytes
-    local vpn_tx_bytes
-    local vpn_rx_packets
-    local vpn_tx_packets
-    ts_rx_bytes=$(interface_stat "tailscale0" "rx_bytes")
-    ts_tx_bytes=$(interface_stat "tailscale0" "tx_bytes")
-    ts_rx_packets=$(interface_stat "tailscale0" "rx_packets")
-    ts_tx_packets=$(interface_stat "tailscale0" "tx_packets")
-    vpn_rx_bytes=$(interface_stat "${VPN_INTERFACE:-}" "rx_bytes")
-    vpn_tx_bytes=$(interface_stat "${VPN_INTERFACE:-}" "tx_bytes")
-    vpn_rx_packets=$(interface_stat "${VPN_INTERFACE:-}" "rx_packets")
-    vpn_tx_packets=$(interface_stat "${VPN_INTERFACE:-}" "tx_packets")
     local status_tmp="${STATUS_FILE}.tmp.${BASHPID:-$$}"
     cat > "$status_tmp" <<EOF
 {
@@ -91,14 +76,6 @@ write_status() {
   "connected": ${connected},
   "tailscale_ip": "${ts_ip}",
   "hostname": "${HOSTNAME:-}",
-  "tailscale_rx_bytes": ${ts_rx_bytes},
-  "tailscale_tx_bytes": ${ts_tx_bytes},
-  "tailscale_rx_packets": ${ts_rx_packets},
-  "tailscale_tx_packets": ${ts_tx_packets},
-  "vpn_rx_bytes": ${vpn_rx_bytes},
-  "vpn_tx_bytes": ${vpn_tx_bytes},
-  "vpn_rx_packets": ${vpn_rx_packets},
-  "vpn_tx_packets": ${vpn_tx_packets},
   "auth_url": "${auth_url}",
   "last_updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -155,6 +132,9 @@ EOF
     mv -f "$traffic_tmp" "$TRAFFIC_FILE"
 }
 
+# Do not expose counters from a previous container run while the bridge is
+# booting or waiting for Tailscale/VPN authentication.
+rm -f "$TRAFFIC_FILE"
 write_status "false"
 
 # 1. Definir e Validar o Modo de VPN

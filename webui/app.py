@@ -35,6 +35,10 @@ WEBUI_PROTOCOL = os.environ.get("WEBUI_PROTOCOL", "http").lower()
 WEBUI_ACCESS_MODE = os.environ.get("WEBUI_ACCESS_MODE", "all").lower()
 WEBUI_BIND_ADDRESS = os.environ.get("WEBUI_BIND_ADDRESS", "0.0.0.0")
 WEBUI_ALLOWED_CIDRS = os.environ.get("WEBUI_ALLOWED_CIDRS", "").strip()
+try:
+    STATUS_UPDATE_INTERVAL = max(1, int(os.environ.get("STATUS_UPDATE_INTERVAL", "2")))
+except ValueError as exc:
+    raise RuntimeError("STATUS_UPDATE_INTERVAL must be a positive integer") from exc
 if WEBUI_ACCESS_MODE == "tailnet" and not WEBUI_ALLOWED_CIDRS:
     WEBUI_ALLOWED_CIDRS = "100.64.0.0/10,fd7a:115c:a1e0::/48"
 
@@ -221,7 +225,7 @@ def read_status():
         "vpn_tx_packets",
         "traffic_updated",
     }
-    if os.path.isfile(TRAFFIC_FILE):
+    if default["connected"] and os.path.isfile(TRAFFIC_FILE):
         try:
             with open(TRAFFIC_FILE, "r", encoding="utf-8") as f:
                 traffic = json.load(f)
@@ -272,6 +276,7 @@ def build_context(env_values, files_present):
         "csrf_token": csrf_token,
         "vpn_type": env_values.get("VPN_TYPE", "auto"),
         "ts_hostname": env_values.get("TS_HOSTNAME", ""),
+        "status_update_interval": STATUS_UPDATE_INTERVAL,
     }
 
 

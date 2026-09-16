@@ -6,6 +6,7 @@
 
   var previousTraffic = null;
   var lastAnnouncedConnection = null;
+  var statusRequestInFlight = false;
 
   function setText(id, value) {
     var el = document.getElementById(id);
@@ -62,7 +63,7 @@
     }
 
     setText("tailnet-rx-rate", formatBytes(delta("tailscale_rx_bytes") / elapsed));
-      setText("tailnet-rx-packets", formatPackets(current.tailscale_rx_packets));
+    setText("tailnet-rx-packets", formatPackets(current.tailscale_rx_packets));
     setText("vpn-tx-rate", formatBytes(delta("vpn_tx_bytes") / elapsed));
     setText("vpn-tx-packets", formatPackets(current.vpn_tx_packets));
     setText("vpn-rx-rate", formatBytes(delta("vpn_rx_bytes") / elapsed));
@@ -123,6 +124,8 @@
   function refreshStatus() {
     var el = document.getElementById("schematic-panel");
     if (!el) return;
+    if (statusRequestInFlight) return;
+    statusRequestInFlight = true;
     fetch(el.dataset.statusUrl, { credentials: "same-origin" })
       .then(function (res) {
         if (!res.ok) throw new Error("status request failed");
@@ -143,6 +146,9 @@
         var stateEl = document.getElementById("tb-state");
         if (stateEl) stateEl.className = "state-off";
         el.classList.add("stale");
+      })
+      .then(function () {
+        statusRequestInFlight = false;
       });
   }
 

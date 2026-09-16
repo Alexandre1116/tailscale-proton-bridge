@@ -37,7 +37,7 @@ def test_invalid_credentials_are_rejected(client):
     assert response.status_code == 401
 
 
-def test_status_keeps_health_state_when_traffic_updates_separately(client, tmp_path, monkeypatch):
+def test_status_ignores_stale_traffic_when_health_is_disconnected(client, tmp_path, monkeypatch):
     status_path = tmp_path / "status.json"
     traffic_path = tmp_path / "traffic.json"
     status_path.write_text(json.dumps({"connected": False, "last_updated": "health-time"}), encoding="utf-8")
@@ -53,6 +53,26 @@ def test_status_keeps_health_state_when_traffic_updates_separately(client, tmp_p
     assert response.status_code == 200
     data = response.get_json()
     assert data["connected"] is False
+    assert data["vpn_tx_bytes"] == 0
+    assert data["traffic_updated"] is None
+
+
+def test_status_keeps_health_state_when_live_traffic_updates_separately(client, tmp_path, monkeypatch):
+    status_path = tmp_path / "status.json"
+    traffic_path = tmp_path / "traffic.json"
+    status_path.write_text(json.dumps({"connected": True, "last_updated": "health-time"}), encoding="utf-8")
+    traffic_path.write_text(
+        json.dumps({"vpn_tx_bytes": 1234, "traffic_updated": "traffic-time"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webapp, "STATUS_FILE", str(status_path))
+    monkeypatch.setattr(webapp, "TRAFFIC_FILE", str(traffic_path))
+
+    response = client.get("/api/status", headers=auth_header())
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["connected"] is True
     assert data["vpn_tx_bytes"] == 1234
     assert data["traffic_updated"] == "traffic-time"
 
