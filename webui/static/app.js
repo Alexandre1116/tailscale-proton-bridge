@@ -85,10 +85,20 @@
       return;
     }
 
+    var counterReset = Object.keys(current).some(function (key) {
+      return current[key] < previousTraffic.values[key];
+    });
+    if (counterReset) {
+      previousTraffic = { sampleTime: sampleTime, values: current };
+      panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
+      resetTraffic();
+      return;
+    }
+
     var elapsed = Math.max((sampleTime - previousTraffic.sampleTime) / 1000, 0.25);
 
     function delta(key) {
-      if (!hasNewSample || current[key] < previousTraffic.values[key]) return 0n;
+      if (!hasNewSample) return 0n;
       return current[key] - previousTraffic.values[key];
     }
 
