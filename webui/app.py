@@ -26,6 +26,7 @@ VPN_DIR = os.environ.get("VPN_DIR", "/data/vpn")
 WG_DIR = os.path.join(VPN_DIR, "wireguard")
 OVPN_DIR = os.path.join(VPN_DIR, "openvpn")
 STATUS_FILE = os.environ.get("STATUS_FILE", "/var/run/bridge-status/status.json")
+TRAFFIC_FILE = os.environ.get("TRAFFIC_FILE", "/var/run/bridge-status/traffic.json")
 
 WEBUI_USERNAME = os.environ.get("WEBUI_USERNAME", "admin")
 WEBUI_PASSWORD = os.environ.get("WEBUI_PASSWORD", "")
@@ -198,19 +199,37 @@ def read_status():
         "vpn_tx_bytes": 0,
         "vpn_rx_packets": 0,
         "vpn_tx_packets": 0,
+        "traffic_updated": None,
         "auth_url": "",
         "last_updated": None,
     }
-    if not os.path.isfile(STATUS_FILE):
-        return default
-    try:
-        with open(STATUS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            default.update(data)
-            return default
-    except (json.JSONDecodeError, OSError):
-        default["error"] = "could not read status"
-        return default
+    if os.path.isfile(STATUS_FILE):
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                default.update(json.load(f))
+        except (json.JSONDecodeError, OSError):
+            default["error"] = "could not read status"
+
+    traffic_keys = {
+        "tailscale_rx_bytes",
+        "tailscale_tx_bytes",
+        "tailscale_rx_packets",
+        "tailscale_tx_packets",
+        "vpn_rx_bytes",
+        "vpn_tx_bytes",
+        "vpn_rx_packets",
+        "vpn_tx_packets",
+        "traffic_updated",
+    }
+    if os.path.isfile(TRAFFIC_FILE):
+        try:
+            with open(TRAFFIC_FILE, "r", encoding="utf-8") as f:
+                traffic = json.load(f)
+            default.update({key: traffic[key] for key in traffic_keys if key in traffic})
+        except (json.JSONDecodeError, OSError):
+            default["error"] = "could not read traffic status"
+
+    return default
 
 
 def save_upload(file_storage, dest_dir, dest_name):

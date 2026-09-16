@@ -40,6 +40,7 @@ trap cleanup SIGTERM SIGINT
 # 0. Estado partilhado (lido pela Web UI através de um volume Docker)
 STATUS_DIR="/var/run/bridge-status"
 STATUS_FILE="$STATUS_DIR/status.json"
+TRAFFIC_FILE="$STATUS_DIR/traffic.json"
 mkdir -p "$STATUS_DIR"
 read_secret_file() {
     if [ -z "${1:-}" ] || [ ! -r "$1" ]; then
@@ -117,6 +118,41 @@ interface_stat() {
     else
         echo 0
     fi
+}
+
+write_traffic() {
+    local ts_rx_bytes
+    local ts_tx_bytes
+    local ts_rx_packets
+    local ts_tx_packets
+    local vpn_rx_bytes
+    local vpn_tx_bytes
+    local vpn_rx_packets
+    local vpn_tx_packets
+    ts_rx_bytes=$(interface_stat "tailscale0" "rx_bytes")
+    ts_tx_bytes=$(interface_stat "tailscale0" "tx_bytes")
+    ts_rx_packets=$(interface_stat "tailscale0" "rx_packets")
+    ts_tx_packets=$(interface_stat "tailscale0" "tx_packets")
+    vpn_rx_bytes=$(interface_stat "${VPN_INTERFACE:-}" "rx_bytes")
+    vpn_tx_bytes=$(interface_stat "${VPN_INTERFACE:-}" "tx_bytes")
+    vpn_rx_packets=$(interface_stat "${VPN_INTERFACE:-}" "rx_packets")
+    vpn_tx_packets=$(interface_stat "${VPN_INTERFACE:-}" "tx_packets")
+    local traffic_tmp="${TRAFFIC_FILE}.tmp.${BASHPID:-$$}"
+    cat > "$traffic_tmp" <<EOF
+{
+  "tailscale_rx_bytes": ${ts_rx_bytes},
+  "tailscale_tx_bytes": ${ts_tx_bytes},
+  "tailscale_rx_packets": ${ts_rx_packets},
+  "tailscale_tx_packets": ${ts_tx_packets},
+  "vpn_rx_bytes": ${vpn_rx_bytes},
+  "vpn_tx_bytes": ${vpn_tx_bytes},
+  "vpn_rx_packets": ${vpn_rx_packets},
+  "vpn_tx_packets": ${vpn_tx_packets},
+  "traffic_updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+    chmod 0644 "$traffic_tmp"
+    mv -f "$traffic_tmp" "$TRAFFIC_FILE"
 }
 
 write_status "false"
@@ -424,7 +460,7 @@ vpn_failures=0
 
 status_writer() {
     while true; do
-        write_status "true"
+        write_traffic
         sleep "$STATUS_UPDATE_INTERVAL"
     done
 }

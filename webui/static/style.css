@@ -63,16 +63,15 @@ code, input, select, .eyebrow, .brand-text p, .title-block dt, .traffic-stat sma
 .graph-ip { fill: #7f969d; font-size: 10px; }
 .traffic-panel.connected .graph-ip { fill: var(--teal); }
 .traffic-dot { fill: var(--orange); opacity: 0; filter: drop-shadow(0 0 5px rgba(227, 106, 77, 0.9)); }
-.traffic-panel.flow-ingress .dot-ingress, .traffic-panel.flow-egress .dot-egress, .traffic-panel.flow-return .dot-return-vpn, .traffic-panel.flow-return .dot-return-tailnet { animation-play-state: running; }
-.dot-ingress, .dot-egress, .dot-return-vpn, .dot-return-tailnet { animation-play-state: paused; }
 @keyframes move-ingress { 0% { cx: 164px; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { cx: 292px; opacity: 0; } }
 @keyframes move-egress { 0% { cx: 468px; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { cx: 596px; opacity: 0; } }
 @keyframes move-return-vpn { 0% { cx: 596px; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { cx: 468px; opacity: 0; } }
 @keyframes move-return-tailnet { 0% { cx: 292px; opacity: 0; } 12% { opacity: 1; } 88% { opacity: 1; } 100% { cx: 164px; opacity: 0; } }
-.dot-ingress { animation: move-ingress 1.2s linear infinite; }
-.dot-egress { animation: move-egress 1.2s linear infinite; }
-.dot-return-vpn { animation: move-return-vpn 1.2s linear infinite; }
-.dot-return-tailnet { animation: move-return-tailnet 1.2s linear infinite; }
+.dot-ingress { animation: move-ingress 1.2s linear infinite; animation-play-state: paused; }
+.dot-egress { animation: move-egress 1.2s linear infinite; animation-play-state: paused; }
+.dot-return-vpn { animation: move-return-vpn 1.2s linear infinite; animation-play-state: paused; }
+.dot-return-tailnet { animation: move-return-tailnet 1.2s linear infinite; animation-play-state: paused; }
+.traffic-panel.flow-ingress .dot-ingress, .traffic-panel.flow-egress .dot-egress, .traffic-panel.flow-return .dot-return-vpn, .traffic-panel.flow-return .dot-return-tailnet { animation-play-state: running; }
 
 .traffic-stats { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid rgba(245, 239, 229, 0.14); }
 .traffic-stat { min-width: 0; padding: 12px 13px 7px; border-right: 1px solid rgba(245, 239, 229, 0.14); }
@@ -109,14 +108,14 @@ input[type=text]:focus, input[type=password]:focus, select:focus { outline: 2px 
 .dropzone { padding: 17px 14px; border: 1px dashed #526b76; border-radius: 8px; background: var(--surface-muted); color: var(--muted); cursor: pointer; font-family: var(--font-mono); font-size: 0.74rem; text-align: center; transition: border-color .15s, background-color .15s, color .15s; }
 .dropzone:hover, .dropzone.dragover { border-color: var(--orange); background: #242329; color: var(--ink); }
 .dropzone input[type=file] { display: none; }
-.dropzone .filename { color: #16856c; }
+.dropzone .filename { color: var(--teal); }
 .file-status { margin-top: 6px; font-size: 0.68rem; }
 .file-status.ok { color: var(--teal); }
 .file-status.missing { color: var(--orange-dark); }
 
 .btn { display: inline-block; padding: 10px 16px; border: 1px solid var(--orange); border-radius: 7px; background: var(--orange); color: #fffaf5; cursor: pointer; font-size: 0.72rem; font-weight: 750; letter-spacing: 0.05em; text-decoration: none; text-transform: uppercase; }
 .btn:hover { border-color: var(--orange-dark); background: var(--orange-dark); }
-.btn:focus-visible { outline: 2px solid var(--navy); outline-offset: 2px; }
+.btn:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .btn.ghost { border-color: var(--line); background: transparent; color: var(--muted); }
 .btn.ghost:hover { border-color: var(--navy-soft); background: var(--surface-muted); color: var(--ink); }
 .actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 8px; }
@@ -124,6 +123,7 @@ input[type=text]:focus, input[type=password]:focus, select:focus { outline: 2px 
 .flash { margin-bottom: 14px; padding: 11px 13px; border-left: 3px solid var(--teal); border-radius: 6px; background: #122a29; font-size: 0.83rem; }
 .flash.error { border-left-color: var(--danger); background: #2b1c21; }
 footer.page-footer { padding-top: 28px; color: var(--muted); font-family: var(--font-mono); font-size: 0.67rem; text-align: center; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .wizard-rail { display: flex; gap: 5px; margin-bottom: 24px; }
 .wizard-rail .seg { flex: 1; height: 4px; border-radius: 99px; background: var(--line); }

@@ -5,6 +5,7 @@
   "use strict";
 
   var previousTraffic = null;
+  var lastAnnouncedConnection = null;
 
   function setText(id, value) {
     var el = document.getElementById(id);
@@ -27,8 +28,20 @@
     return new Intl.NumberFormat().format(Math.round(value)) + " packets";
   }
 
+  function resetTraffic() {
+    ["tailnet-rx-rate", "vpn-tx-rate", "vpn-rx-rate", "tailnet-tx-rate"].forEach(function (id) {
+      setText(id, "--");
+    });
+    ["tailnet-rx-packets", "vpn-tx-packets", "vpn-rx-packets", "tailnet-tx-packets"].forEach(function (id) {
+      setText(id, "-- packets");
+    });
+  }
+
   function updateTraffic(data, panel) {
     var now = Date.now();
+    var sampleTime = Date.parse(data.traffic_updated || data.last_updated || "");
+    if (!Number.isFinite(sampleTime)) sampleTime = now;
+    var hasNewSample = !previousTraffic || sampleTime > previousTraffic.sampleTime;
     var current = {
       tailscale_rx_bytes: numberValue(data.tailscale_rx_bytes),
       tailscale_tx_bytes: numberValue(data.tailscale_tx_bytes),
@@ -39,10 +52,12 @@
       vpn_rx_packets: numberValue(data.vpn_rx_packets),
       vpn_tx_packets: numberValue(data.vpn_tx_packets)
     };
-    var elapsed = previousTraffic ? Math.max((now - previousTraffic.timestamp) / 1000, 0.25) : 1;
+    var elapsed = previousTraffic && hasNewSample
+      ? Math.max((sampleTime - previousTraffic.sampleTime) / 1000, 0.25)
+      : 1;
 
     function delta(key) {
-      if (!previousTraffic || current[key] < previousTraffic.values[key]) return 0;
+      if (!previousTraffic || !hasNewSample || current[key] < previousTraffic.values[key]) return 0;
       return current[key] - previousTraffic.values[key];
     }
 
@@ -56,12 +71,12 @@
     setText("tailnet-tx-packets", formatPackets(current.tailscale_tx_packets));
 
     panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
-    if (previousTraffic && data.connected) {
+    if (previousTraffic && hasNewSample && data.connected) {
       if (delta("tailscale_rx_packets") > 0) panel.classList.add("flow-ingress");
       if (delta("vpn_tx_packets") > 0) panel.classList.add("flow-egress");
       if (delta("vpn_rx_packets") > 0 || delta("tailscale_tx_packets") > 0) panel.classList.add("flow-return");
     }
-    previousTraffic = { timestamp: now, values: current };
+    previousTraffic = { sampleTime: sampleTime, values: current };
   }
 
   function applyStatus(data) {
@@ -78,7 +93,12 @@
     }
     if (protoEl) protoEl.textContent = (data.vpn_mode || "-").toUpperCase();
 
-    setText("traffic-live-label", connected ? "Connected" : (data.auth_url ? "Waiting" : "Disconnected"));
+    var connectionLabel = connected ? "Connected" : (data.auth_url ? "Waiting" : "Disconnected");
+    setText("traffic-live-label", connectionLabel);
+    if (connectionLabel !== lastAnnouncedConnection) {
+      setText("connection-announcement", "Connection status: " + connectionLabel);
+      lastAnnouncedConnection = connectionLabel;
+    }
 
     var nodeIp = connected && data.tailscale_ip ? data.tailscale_ip : "not connected";
     setText("node-ip", nodeIp);
@@ -110,8 +130,18 @@
       })
       .then(applyStatus)
       .catch(function () {
+        el.classList.remove("connected", "flow-ingress", "flow-egress", "flow-return");
+        previousTraffic = null;
         setText("tb-state", "UNAVAILABLE");
         setText("traffic-live-label", "Unavailable");
+        setText("node-ip", "not connected");
+        setText("node-ip-mobile", "not connected");
+        setText("status-detail-text", "Unable to read bridge status.");
+        setText("connection-announcement", "Connection status: unavailable");
+        lastAnnouncedConnection = "Unavailable";
+        resetTraffic();
+        var stateEl = document.getElementById("tb-state");
+        if (stateEl) stateEl.className = "state-off";
         el.classList.add("stale");
       });
   }
