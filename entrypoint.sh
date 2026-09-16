@@ -9,10 +9,14 @@ echo "   Tailscale - Proton VPN Bridge Exit Node   "
 echo "============================================="
 
 WG_RUNNING_CONF="/tmp/protonvpn.conf"
+STATUS_WRITER_PID=""
 
 # Função de limpeza para encerramento gracioso
 cleanup() {
     echo "Sinal de paragem recebido. A encerrar serviços..."
+    if [ -n "$STATUS_WRITER_PID" ]; then
+        kill -TERM "$STATUS_WRITER_PID" 2>/dev/null || true
+    fi
     write_status "false" 2>/dev/null || true
     if [ "$VPN_MODE" = "wireguard" ]; then
         echo "A desligar interface WireGuard..."
@@ -62,7 +66,23 @@ write_status() {
     if [ "$connected" = "true" ]; then
         ts_ip=$(tailscale ip -4 2>/dev/null | head -n1)
     fi
-    local status_tmp="${STATUS_FILE}.tmp.$$"
+    local ts_rx_bytes
+    local ts_tx_bytes
+    local ts_rx_packets
+    local ts_tx_packets
+    local vpn_rx_bytes
+    local vpn_tx_bytes
+    local vpn_rx_packets
+    local vpn_tx_packets
+    ts_rx_bytes=$(interface_stat "tailscale0" "rx_bytes")
+    ts_tx_bytes=$(interface_stat "tailscale0" "tx_bytes")
+    ts_rx_packets=$(interface_stat "tailscale0" "rx_packets")
+    ts_tx_packets=$(interface_stat "tailscale0" "tx_packets")
+    vpn_rx_bytes=$(interface_stat "${VPN_INTERFACE:-}" "rx_bytes")
+    vpn_tx_bytes=$(interface_stat "${VPN_INTERFACE:-}" "tx_bytes")
+    vpn_rx_packets=$(interface_stat "${VPN_INTERFACE:-}" "rx_packets")
+    vpn_tx_packets=$(interface_stat "${VPN_INTERFACE:-}" "tx_packets")
+    local status_tmp="${STATUS_FILE}.tmp.${BASHPID:-$$}"
     cat > "$status_tmp" <<EOF
 {
   "vpn_mode": "${VPN_MODE:-}",
@@ -70,6 +90,14 @@ write_status() {
   "connected": ${connected},
   "tailscale_ip": "${ts_ip}",
   "hostname": "${HOSTNAME:-}",
+  "tailscale_rx_bytes": ${ts_rx_bytes},
+  "tailscale_tx_bytes": ${ts_tx_bytes},
+  "tailscale_rx_packets": ${ts_rx_packets},
+  "tailscale_tx_packets": ${ts_tx_packets},
+  "vpn_rx_bytes": ${vpn_rx_bytes},
+  "vpn_tx_bytes": ${vpn_tx_bytes},
+  "vpn_rx_packets": ${vpn_rx_packets},
+  "vpn_tx_packets": ${vpn_tx_packets},
   "auth_url": "${auth_url}",
   "last_updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
@@ -78,6 +106,17 @@ EOF
     # to read this status file. It never contains VPN credentials.
     chmod 0644 "$status_tmp"
     mv -f "$status_tmp" "$STATUS_FILE"
+}
+
+interface_stat() {
+    local interface="$1"
+    local stat="$2"
+    local path="/sys/class/net/${interface}/statistics/${stat}"
+    if [ -n "$interface" ] && [ -r "$path" ]; then
+        cat "$path"
+    else
+        echo 0
+    fi
 }
 
 write_status "false"
@@ -380,7 +419,18 @@ write_status "true"
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
 VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
+STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
 vpn_failures=0
+
+status_writer() {
+    while true; do
+        write_status "true"
+        sleep "$STATUS_UPDATE_INTERVAL"
+    done
+}
+
+status_writer &
+STATUS_WRITER_PID=$!
 
 check_vpn_connectivity() {
     tailscale status >/dev/null 2>&1 || return 1

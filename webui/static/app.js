@@ -1,32 +1,91 @@
 // Tailscale <-> Proton VPN Bridge - Web UI
-// Estado em tempo real, diagrama do percurso do sinal, uploads por
-// arrastar-e-largar, e navegação do assistente de configuração.
+// Live status, traffic path, drag-and-drop uploads, and setup wizard controls.
 
 (function () {
   "use strict";
+
+  var previousTraffic = null;
 
   function setText(id, value) {
     var el = document.getElementById(id);
     if (el) el.textContent = value;
   }
 
+  function numberValue(value) {
+    var parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  }
+
+  function formatBytes(value) {
+    if (value < 1024) return Math.round(value) + " B/s";
+    if (value < 1024 * 1024) return (value / 1024).toFixed(1) + " KB/s";
+    if (value < 1024 * 1024 * 1024) return (value / (1024 * 1024)).toFixed(1) + " MB/s";
+    return (value / (1024 * 1024 * 1024)).toFixed(1) + " GB/s";
+  }
+
+  function formatPackets(value) {
+    return new Intl.NumberFormat().format(Math.round(value)) + " packets";
+  }
+
+  function updateTraffic(data, panel) {
+    var now = Date.now();
+    var current = {
+      tailscale_rx_bytes: numberValue(data.tailscale_rx_bytes),
+      tailscale_tx_bytes: numberValue(data.tailscale_tx_bytes),
+      tailscale_rx_packets: numberValue(data.tailscale_rx_packets),
+      tailscale_tx_packets: numberValue(data.tailscale_tx_packets),
+      vpn_rx_bytes: numberValue(data.vpn_rx_bytes),
+      vpn_tx_bytes: numberValue(data.vpn_tx_bytes),
+      vpn_rx_packets: numberValue(data.vpn_rx_packets),
+      vpn_tx_packets: numberValue(data.vpn_tx_packets)
+    };
+    var elapsed = previousTraffic ? Math.max((now - previousTraffic.timestamp) / 1000, 0.25) : 1;
+
+    function delta(key) {
+      if (!previousTraffic || current[key] < previousTraffic.values[key]) return 0;
+      return current[key] - previousTraffic.values[key];
+    }
+
+    setText("tailnet-rx-rate", formatBytes(delta("tailscale_rx_bytes") / elapsed));
+      setText("tailnet-rx-packets", formatPackets(current.tailscale_rx_packets));
+    setText("vpn-tx-rate", formatBytes(delta("vpn_tx_bytes") / elapsed));
+    setText("vpn-tx-packets", formatPackets(current.vpn_tx_packets));
+    setText("vpn-rx-rate", formatBytes(delta("vpn_rx_bytes") / elapsed));
+    setText("vpn-rx-packets", formatPackets(current.vpn_rx_packets));
+    setText("tailnet-tx-rate", formatBytes(delta("tailscale_tx_bytes") / elapsed));
+    setText("tailnet-tx-packets", formatPackets(current.tailscale_tx_packets));
+
+    panel.classList.remove("flow-ingress", "flow-egress", "flow-return");
+    if (previousTraffic && data.connected) {
+      if (delta("tailscale_rx_packets") > 0) panel.classList.add("flow-ingress");
+      if (delta("vpn_tx_packets") > 0) panel.classList.add("flow-egress");
+      if (delta("vpn_rx_packets") > 0 || delta("tailscale_tx_packets") > 0) panel.classList.add("flow-return");
+    }
+    previousTraffic = { timestamp: now, values: current };
+  }
+
   function applyStatus(data) {
     var connected = !!data.connected;
     var panel = document.getElementById("schematic-panel");
     if (panel) panel.classList.toggle("connected", connected);
+    if (panel) panel.classList.remove("stale");
 
     var stateEl = document.getElementById("tb-state");
     var protoEl = document.getElementById("tb-proto");
     if (stateEl) {
-      stateEl.textContent = connected ? "LIGADO" : (data.auth_url ? "PENDENTE" : "DESLIGADO");
+      stateEl.textContent = connected ? "CONNECTED" : (data.auth_url ? "PENDING" : "DISCONNECTED");
       stateEl.className = connected ? "state-ok" : (data.auth_url ? "state-pending" : "state-off");
     }
     if (protoEl) protoEl.textContent = (data.vpn_mode || "-").toUpperCase();
 
-    setText("node-ip", connected && data.tailscale_ip ? data.tailscale_ip : "sem ligação");
+    setText("traffic-live-label", connected ? "Connected" : (data.auth_url ? "Waiting" : "Disconnected"));
+
+    var nodeIp = connected && data.tailscale_ip ? data.tailscale_ip : "not connected";
+    setText("node-ip", nodeIp);
+    setText("node-ip-mobile", nodeIp);
 
     setText("status-detail-text",
-      data.last_updated ? ("Última verificação: " + data.last_updated) : "Sem dados de estado ainda.");
+      data.last_updated ? ("Last checked: " + data.last_updated) : "No status data yet.");
 
     var strip = document.getElementById("action-strip");
     var link = document.getElementById("action-strip-link");
@@ -38,23 +97,29 @@
         strip.classList.remove("show");
       }
     }
+    if (panel) updateTraffic(data, panel);
   }
 
   function refreshStatus() {
     var el = document.getElementById("schematic-panel");
     if (!el) return;
     fetch(el.dataset.statusUrl, { credentials: "same-origin" })
-      .then(function (res) { return res.json(); })
+      .then(function (res) {
+        if (!res.ok) throw new Error("status request failed");
+        return res.json();
+      })
       .then(applyStatus)
       .catch(function () {
-        setText("tb-state", "INDISPONÍVEL");
+        setText("tb-state", "UNAVAILABLE");
+        setText("traffic-live-label", "Unavailable");
+        el.classList.add("stale");
       });
   }
 
   function initStatusPolling() {
     if (!document.getElementById("schematic-panel")) return;
     refreshStatus();
-    setInterval(refreshStatus, 5000);
+    setInterval(refreshStatus, 2000);
   }
 
   function initVpnTypeToggle() {
@@ -79,7 +144,7 @@
 
       function announce() {
         if (input.files && input.files.length) {
-          label.textContent = "Selecionado: ";
+          label.textContent = "Selected: ";
           var filename = document.createElement("span");
           filename.className = "filename";
           filename.textContent = input.files[0].name;
@@ -161,7 +226,7 @@
       btn.addEventListener("click", function () { show(Math.max(current - 1, 0)); });
     });
 
-    // Alterna entre "auth key" e "link de login" para o Tailscale
+    // Switch between a Tailscale auth key and a login link.
     var methodRadios = wizard.querySelectorAll('input[name="ts_method"]');
     var authKeyBlock = wizard.querySelector('[data-ts-block="authkey"]');
     var authKeyInput = authKeyBlock ? authKeyBlock.querySelector('input[name="ts_authkey"]') : null;

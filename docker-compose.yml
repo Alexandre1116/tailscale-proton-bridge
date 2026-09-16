@@ -50,6 +50,7 @@ services:
       - VPN_CHECK_INTERVAL=${VPN_CHECK_INTERVAL:-30}
       - VPN_FAILURE_THRESHOLD=${VPN_FAILURE_THRESHOLD:-3}
       - VPN_HEALTHCHECK_URL=${VPN_HEALTHCHECK_URL:-https://api.ipify.org}
+      - STATUS_UPDATE_INTERVAL=${STATUS_UPDATE_INTERVAL:-2}
       # Argumentos adicionais opcionais para o comando 'tailscale up'
       - TS_EXTRA_ARGS=${TS_EXTRA_ARGS:-}
 

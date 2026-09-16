@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Assistente de configuração &mdash; Tailscale &harr; Proton VPN{% endblock %}
+{% block title %}Setup wizard &mdash; Tailscale &harr; Proton VPN{% endblock %}
 {% block content %}
 
 <div class="panel" id="wizard">
@@ -12,80 +12,80 @@
     <input type="hidden" name="setup_complete" value="1">
 
     <div class="step-card">
-      <div class="step-marker"><span class="n">1</span> BEM-VINDO</div>
-      <h2>Vamos ligar a sua Tailnet à Proton VPN</h2>
+      <div class="step-marker"><span class="n">1</span> WELCOME</div>
+      <h2>Connect your Tailnet to Proton VPN</h2>
       <p class="intro-copy">
-        Este assistente prepara a ponte em três passos: escolher o protocolo da
-        <strong>Proton VPN</strong> e carregar a respetiva configuração, escolher como
-        autenticar o <strong>Tailscale</strong>, e dar um nome ao dispositivo. Pode
-        alterar tudo mais tarde no painel principal.
+        This wizard sets up the bridge in four steps. Choose a <strong>Proton VPN</strong>
+        protocol and upload its configuration, choose how to authenticate
+        <strong>Tailscale</strong>, then name the device. You can change these settings
+        later from the main dashboard.
       </p>
       <div class="actions">
-        <button type="button" class="btn" data-next>Começar</button>
-        <a class="btn ghost" href="{{ url_for('index', skip_wizard=1) }}">Saltar, prefiro configurar manualmente</a>
+        <button type="button" class="btn" data-next>Get started</button>
+        <a class="btn ghost" href="{{ url_for('index', skip_wizard=1) }}">Skip and configure manually</a>
       </div>
     </div>
 
     <div class="step-card">
-      <div class="step-marker"><span class="n">2</span> PROTOCOLO VPN</div>
-      <h2>Como se liga à Proton VPN?</h2>
+      <div class="step-marker"><span class="n">2</span> VPN PROTOCOL</div>
+      <h2>How should the bridge connect to Proton VPN?</h2>
 
       <div class="radio-group">
-        <label><input type="radio" name="vpn_type" value="wireguard" checked> WireGuard <span class="hint">(recomendado)</span></label>
+        <label><input type="radio" name="vpn_type" value="wireguard" checked> WireGuard <span class="hint">(recommended)</span></label>
         <label><input type="radio" name="vpn_type" value="openvpn"> OpenVPN</label>
       </div>
 
       <div class="vpn-block active" data-vpn="wireguard">
-        <label>Ficheiro de configuração (protonvpn.conf)</label>
+        <label>Configuration file (protonvpn.conf)</label>
         <div class="dropzone">
-          <span class="dz-label">Arraste o ficheiro .conf da Proton para aqui, ou clique para escolher</span>
+          <span class="dz-label">Drop the Proton .conf file here, or click to choose it</span>
           <input type="file" name="wg_conf" accept=".conf">
         </div>
         {% if files_present.wireguard %}
-        <div class="file-status ok">Já existe um protonvpn.conf gravado — só é substituído se carregar um novo.</div>
+        <div class="file-status ok">A protonvpn.conf file is already saved. Uploading a new one will replace it.</div>
         {% endif %}
       </div>
 
       <div class="vpn-block" data-vpn="openvpn">
-        <label>Ficheiro de configuração (protonvpn.ovpn)</label>
+        <label>Configuration file (protonvpn.ovpn)</label>
         <div class="dropzone">
-          <span class="dz-label">Arraste o ficheiro .ovpn da Proton para aqui, ou clique para escolher</span>
+          <span class="dz-label">Drop the Proton .ovpn file here, or click to choose it</span>
           <input type="file" name="ovpn_conf" accept=".ovpn">
         </div>
 
-        <label>Ficheiro de credenciais (opcional)</label>
+        <label>Credentials file (optional)</label>
         <div class="dropzone">
-          <span class="dz-label">credentials.txt, ou preencha os campos abaixo</span>
+          <span class="dz-label">Drop credentials.txt here, or enter the values below</span>
           <input type="file" name="ovpn_creds" accept=".txt">
         </div>
 
-        <label>Utilizador OpenVPN</label>
+        <label>OpenVPN username</label>
         <input type="text" name="protonvpn_user" autocomplete="off">
-        <label>Palavra-passe OpenVPN</label>
+        <label>OpenVPN password</label>
         <input type="password" name="protonvpn_password" autocomplete="new-password">
       </div>
 
       <div class="actions">
-        <button type="button" class="btn ghost" data-prev>Voltar</button>
-        <button type="button" class="btn" data-next>Continuar</button>
+        <button type="button" class="btn ghost" data-prev>Back</button>
+        <button type="button" class="btn" data-next>Continue</button>
       </div>
     </div>
 
     <div class="step-card">
-      <div class="step-marker"><span class="n">3</span> LIGAÇÃO TAILSCALE</div>
-      <h2>Como quer autenticar o dispositivo?</h2>
+      <div class="step-marker"><span class="n">3</span> TAILSCALE CONNECTION</div>
+      <h2>How should this device authenticate?</h2>
 
       <fieldset>
         <div class="method-choice">
           <label class="method-card selected">
             <input type="radio" name="ts_method" value="url" checked>
-            <div class="title">Link de login</div>
-            <div class="desc">Sem chave — depois de gravar, um link aparece no painel para aprovar o dispositivo na consola Tailscale.</div>
+            <div class="title">Login link</div>
+            <div class="desc">No key required. After saving, the dashboard shows a link to approve the device in the Tailscale admin console.</div>
           </label>
           <label class="method-card">
             <input type="radio" name="ts_method" value="authkey">
             <div class="title">Auth Key</div>
-            <div class="desc">Cole uma chave reutilizável gerada em Tailscale &rarr; Settings &rarr; Keys.</div>
+            <div class="desc">Paste a reusable key generated in Tailscale under Settings &rarr; Keys.</div>
           </label>
         </div>
 
@@ -95,31 +95,31 @@
         </div>
       </fieldset>
 
-      <label>Nome do dispositivo na Tailnet (TS_HOSTNAME)</label>
+      <label>Tailnet device name (TS_HOSTNAME)</label>
       <input type="text" name="ts_hostname" id="wizard-hostname" value="protonvpn-bridge"
              required pattern="[a-zA-Z0-9][a-zA-Z0-9-]*" maxlength="63">
 
       <div class="actions">
-        <button type="button" class="btn ghost" data-prev>Voltar</button>
-        <button type="button" class="btn" data-next data-validate="#wizard-hostname">Continuar</button>
+        <button type="button" class="btn ghost" data-prev>Back</button>
+        <button type="button" class="btn" data-next data-validate="#wizard-hostname">Continue</button>
       </div>
     </div>
 
     <div class="step-card">
-      <div class="step-marker"><span class="n">4</span> CONFIRMAR</div>
-      <h2>Pronto para gravar</h2>
+      <div class="step-marker"><span class="n">4</span> CONFIRM</div>
+      <h2>Ready to save</h2>
       <p class="intro-copy">
-        Isto escreve a configuração no <code>.env</code> e na pasta <code>./vpn</code>.
-        Depois de gravar, arranque (ou reinicie) o container da ponte:
+        This writes the configuration to <code>.env</code> and <code>./vpn</code>.
+        After saving, start or restart the bridge container:
       </p>
       <p style="font-family: var(--font-mono); font-size: 0.85rem;">docker compose up -d --build</p>
       <p class="intro-copy">
-        Se escolheu <strong>link de login</strong>, volte a esta Web UI depois do arranque
-        — o link de aprovação aparece automaticamente no topo da página.
+        If you chose a <strong>login link</strong>, return to this Web UI after the
+        container starts. The approval link will appear at the top of the page.
       </p>
       <div class="actions">
-        <button type="button" class="btn ghost" data-prev>Voltar</button>
-        <button type="submit" class="btn">Concluir e gravar</button>
+        <button type="button" class="btn ghost" data-prev>Back</button>
+        <button type="submit" class="btn">Finish and save</button>
       </div>
     </div>
   </form>
