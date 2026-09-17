@@ -86,6 +86,8 @@ services:
       - ./secrets:/run/secrets:ro
       # Estado do bridge, apenas em leitura
       - bridge-status:/var/run/bridge-status:ro
+      # Estado partilhado com o serviço de atualização, sem expor o Docker socket à UI
+      - ./updater/state:/data/update-state
     tmpfs:
       - /tmp
     environment:
@@ -97,11 +99,44 @@ services:
       - WEBUI_BIND_ADDRESS=${WEBUI_BIND_ADDRESS:-0.0.0.0}
       - WEBUI_ALLOWED_CIDRS=${WEBUI_ALLOWED_CIDRS:-}
       - STATUS_UPDATE_INTERVAL=${STATUS_UPDATE_INTERVAL:-2}
+      - APP_VERSION=${APP_VERSION:-v0.1.0}
+      - GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-Alexandre1116/tailscale-proton-bridge}
+      - UPDATE_STATE_PATH=/data/update-state/state.json
+      - UPDATE_REQUEST_PATH=/data/update-state/request.json
       - WEBUI_CERT_FILE=${WEBUI_CERT_FILE:-/certs/fullchain.pem}
       - WEBUI_KEY_FILE=${WEBUI_KEY_FILE:-/certs/privkey.pem}
 
     healthcheck:
       test: ["CMD", "./healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  updater:
+    build: ./updater
+    container_name: protonvpn-tailscale-updater
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    # Only this isolated service needs Docker control to rebuild the
+    # application containers after installing a validated release tag.
+    volumes:
+      # Set UPDATE_HOST_PROJECT_PATH to the absolute project path on the Docker
+      # host. The same path is mounted here so Compose paths resolve correctly.
+      - ${UPDATE_HOST_PROJECT_PATH:-.}:${UPDATE_HOST_PROJECT_PATH:-/workspace}
+      - ./updater/state:/state
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - UPDATE_WORKSPACE=${UPDATE_HOST_PROJECT_PATH:-/workspace}
+      - UPDATE_STATE_PATH=/state/state.json
+      - UPDATE_REQUEST_PATH=/state/request.json
+      - GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-Alexandre1116/tailscale-proton-bridge}
+      - APP_VERSION=${APP_VERSION:-v0.1.0}
+      - UPDATE_POLL_INTERVAL=${UPDATE_POLL_INTERVAL:-30}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json; json.load(open('/state/state.json'))"]
       interval: 30s
       timeout: 5s
       retries: 3
