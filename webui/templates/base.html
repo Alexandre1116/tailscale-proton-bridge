@@ -131,6 +131,12 @@
     <a class="btn" id="action-strip-link" href="#" target="_blank" rel="noopener">Open authentication link</a>
   </div>
 
+  <div class="update-banner" id="update-banner" data-update-url="{{ url_for('api_updates') }}" data-check-url="{{ url_for('api_updates_check') }}" data-install-url="{{ url_for('api_updates_install') }}" data-csrf-token="{{ csrf_token if csrf_token is defined else '' }}" hidden>
+    <span class="dot" aria-hidden="true"></span>
+    <p><strong>Update available:</strong> <span id="update-banner-version"></span></p>
+    <button type="button" class="btn" id="update-banner-install">Install update</button>
+  </div>
+
   {% with messages = get_flashed_messages(with_categories=true) %}
     {%- if messages %}
       {%- for category, message in messages %}

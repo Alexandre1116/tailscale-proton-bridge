@@ -328,11 +328,103 @@
     show(0);
   }
 
+  function initUpdater() {
+    var panel = document.getElementById("update-panel");
+    var banner = document.getElementById("update-banner");
+    var source = panel || banner;
+    if (!source || !source.dataset.updateUrl) return;
+
+    var requestInFlight = false;
+    var currentTag = null;
+
+    function setUpdateText(id, value) {
+      var el = document.getElementById(id);
+      if (el) el.textContent = value || "Not checked yet";
+    }
+
+    function render(data) {
+      currentTag = data.latest_version || null;
+      var available = !!data.update_available;
+      var busy = data.status === "checking" || data.status === "installing" || data.status === "queued";
+      var status = data.status === "update_available" ? "Update available" :
+        data.status === "up_to_date" ? "Up to date" :
+        data.status === "installing" ? "Installing" :
+        data.status === "checking" ? "Checking" :
+        data.status === "updated" ? "Updated" :
+        data.status === "error" ? "Unavailable" : "Waiting";
+      setUpdateText("update-current-version", data.current_version);
+      setUpdateText("update-latest-version", data.latest_version);
+      setUpdateText("update-last-checked", data.last_checked);
+      setUpdateText("update-banner-version", data.latest_version);
+      var badge = document.getElementById("update-status-badge");
+      if (badge) {
+        badge.textContent = status;
+        badge.className = "update-status-badge " + (available ? "available" : (data.status === "error" ? "error" : ""));
+      }
+      var message = document.getElementById("update-message");
+      if (message) message.textContent = data.error || (available ? "A new release is ready to install." : status === "up_to_date" ? "No update detected." : "The updater is " + status.toLowerCase() + ".");
+      var install = document.getElementById("install-update");
+      if (install) {
+        install.disabled = !available || busy;
+        install.textContent = busy && data.status === "installing" ? "Installing..." : "Install available update";
+      }
+      var bannerInstall = document.getElementById("update-banner-install");
+      if (banner) banner.hidden = !available;
+      if (bannerInstall) bannerInstall.disabled = busy;
+      var notes = document.getElementById("release-notes");
+      if (notes) {
+        notes.hidden = !data.release_url;
+        if (data.release_url) notes.href = data.release_url;
+      }
+    }
+
+    function refresh() {
+      return fetch(source.dataset.updateUrl, { credentials: "same-origin" })
+        .then(function (res) { if (!res.ok) throw new Error("update status request failed"); return res.json(); })
+        .then(render)
+        .catch(function () {
+          var badge = document.getElementById("update-status-badge");
+          if (badge) { badge.textContent = "Unavailable"; badge.className = "update-status-badge error"; }
+        });
+    }
+
+    function queue(url, extra) {
+      if (requestInFlight) return;
+      requestInFlight = true;
+      var body = new URLSearchParams();
+      body.set("csrf_token", source.dataset.csrfToken || "");
+      if (extra) Object.keys(extra).forEach(function (key) { body.set(key, extra[key]); });
+      fetch(url, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() })
+        .then(function (res) { if (!res.ok) throw new Error("update request failed"); })
+        .then(refresh)
+        .then(function () {
+          window.setTimeout(refresh, 1000);
+          window.setTimeout(refresh, 3000);
+          window.setTimeout(refresh, 6000);
+        })
+        .catch(function () {
+          var message = document.getElementById("update-message");
+          if (message) message.textContent = "Could not contact the updater.";
+        })
+        .then(function () { requestInFlight = false; });
+    }
+
+    var check = document.getElementById("check-updates");
+    if (check) check.addEventListener("click", function () { queue(source.dataset.checkUrl); });
+    var install = document.getElementById("install-update");
+    if (install) install.addEventListener("click", function () { queue(source.dataset.installUrl, { tag: currentTag || "" }); });
+    var bannerInstall = document.getElementById("update-banner-install");
+    if (bannerInstall) bannerInstall.addEventListener("click", function () { queue(source.dataset.installUrl, { tag: currentTag || "" }); });
+    refresh();
+    window.setInterval(refresh, 300000);
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     initStatusPolling();
     initVpnTypeToggle();
     initDropzones();
     initMethodCards();
     initWizard();
+    initUpdater();
   });
 })();

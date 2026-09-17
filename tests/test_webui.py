@@ -140,3 +140,57 @@ def test_save_rejects_invalid_csrf(client):
         data={"csrf_token": "wrong", "ts_hostname": "bridge"},
     )
     assert response.status_code == 400
+
+
+def test_update_status_reads_shared_state(client, tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps({
+            "current_version": "v0.1.0",
+            "latest_version": "v0.2.0",
+            "update_available": True,
+            "status": "update_available",
+            "release_url": "https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.2.0",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webapp, "UPDATE_STATE_PATH", str(state_path))
+
+    response = client.get("/api/updates", headers=auth_header())
+
+    assert response.status_code == 200
+    assert response.get_json()["update_available"] is True
+    assert response.get_json()["latest_version"] == "v0.2.0"
+
+
+def test_update_check_requires_csrf_and_queues_request(client, tmp_path, monkeypatch):
+    request_path = tmp_path / "request.json"
+    monkeypatch.setattr(webapp, "UPDATE_REQUEST_PATH", str(request_path))
+    with client.session_transaction() as session:
+        session["csrf"] = "known-token"
+
+    rejected = client.post("/api/updates/check", headers=auth_header())
+    assert rejected.status_code == 400
+
+    response = client.post(
+        "/api/updates/check",
+        headers=auth_header(),
+        data={"csrf_token": "known-token"},
+    )
+
+    assert response.status_code == 202
+    assert json.loads(request_path.read_text(encoding="utf-8"))["action"] == "check"
+
+
+def test_update_install_rejects_invalid_tag(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(webapp, "UPDATE_REQUEST_PATH", str(tmp_path / "request.json"))
+    with client.session_transaction() as session:
+        session["csrf"] = "known-token"
+
+    response = client.post(
+        "/api/updates/install",
+        headers=auth_header(),
+        data={"csrf_token": "known-token", "tag": "main; rm -rf /"},
+    )
+
+    assert response.status_code == 400

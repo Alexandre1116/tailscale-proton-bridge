@@ -148,6 +148,28 @@ Além do terminal, o projeto inclui uma interface web intuitiva para gerir a bri
    docker compose up -d --build vpn-tailscale-bridge webui
    ```
 
+6. **Atualizações**: O painel consulta a release estável mais recente no GitHub e mostra um aviso quando existe uma versão nova. Use **Install available update** para atualizar com um clique. Em **Automatic updates**, ative a verificação diária e escolha a hora local do anfitrião. Quando encontrar uma release nova, o updater instala-a e reconstrói os dois serviços.
+
+### Configurar o updater
+
+O updater é um serviço separado. Apenas ele tem acesso ao Docker socket; a Web UI comunica através de `./updater/state`. Em Linux/Synology, defina no `.env` o caminho absoluto do projeto no anfitrião:
+
+```dotenv
+APP_VERSION=v0.1.0
+GITHUB_REPOSITORY=Alexandre1116/tailscale-proton-bridge
+AUTO_UPDATE_ENABLED=0
+AUTO_UPDATE_HOUR=03:00
+UPDATE_HOST_PROJECT_PATH=/volume1/docker/tailscale-proton-bridge
+```
+
+Depois inicie todos os serviços:
+
+```bash
+docker compose up -d --build
+```
+
+`AUTO_UPDATE_ENABLED=0` deixa as atualizações sob controlo manual. O updater instala apenas tags de releases válidas e recusa continuar se existirem alterações locais no Git. O serviço consulta a API pública de releases do GitHub. Se a rede estiver indisponível, a última informação permanece visível e a tentativa seguinte é feita normalmente.
+
 ---
 
 ## Como Usar nos Seus Dispositivos
