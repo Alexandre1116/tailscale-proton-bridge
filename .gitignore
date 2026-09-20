@@ -27,6 +27,7 @@ ENV/
 # Runtime status and logs
 *.log
 status.json
+updater/state/*.json
 
 # IDEs & System files
 .vscode/

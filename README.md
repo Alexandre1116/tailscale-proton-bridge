@@ -162,6 +162,26 @@ port, for example `http://<host-ip>:8080`:
    ```bash
    docker compose up -d --build vpn-tailscale-bridge webui
    ```
+5. **Updates**: The dashboard reads the latest stable GitHub release, shows an alert when one is available, and offers one-click installation. Enable automatic updates and choose a local host time for the daily check. The updater installs the release and rebuilds the application services.
+
+### Updater setup
+
+The updater runs as a separate service. Only it has access to the Docker socket,
+while the Web UI communicates through `./updater/state`. On Linux or Synology,
+set the absolute project path in `.env` so Docker Compose can resolve build and
+bind-mount paths from the updater container:
+
+```dotenv
+APP_VERSION=v0.1.0
+GITHUB_REPOSITORY=Alexandre1116/tailscale-proton-bridge
+AUTO_UPDATE_ENABLED=0
+AUTO_UPDATE_HOUR=03:00
+UPDATE_HOST_PROJECT_PATH=/volume1/docker/tailscale-proton-bridge
+```
+
+Start all services with `docker compose up -d --build`. With automatic updates
+disabled, use **Check now** and **Install available update** in the dashboard.
+The updater refuses to install over local Git changes.
 
 ---
 

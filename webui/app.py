@@ -2,9 +2,8 @@
 """Configuration Web UI for the Tailscale <-> Proton VPN Bridge.
 
 Lets users edit the project's .env file and upload VPN configuration files
-(WireGuard/OpenVPN) without SSH access to the host. It does not control the
-bridge container because it has no access to the Docker socket. Restart both
-containers manually after saving changes.
+(WireGuard/OpenVPN) without SSH access to the host. Update requests are handed
+to the isolated updater service through a shared state directory.
 """
 import hmac
 import json
@@ -13,6 +12,7 @@ import re
 import secrets
 import ipaddress
 import tempfile
+from datetime import datetime, timezone
 from functools import wraps
 
 from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
@@ -27,6 +27,12 @@ WG_DIR = os.path.join(VPN_DIR, "wireguard")
 OVPN_DIR = os.path.join(VPN_DIR, "openvpn")
 STATUS_FILE = os.environ.get("STATUS_FILE", "/var/run/bridge-status/status.json")
 TRAFFIC_FILE = os.environ.get("TRAFFIC_FILE", "/var/run/bridge-status/traffic.json")
+UPDATE_STATE_PATH = os.environ.get("UPDATE_STATE_PATH", "/data/update-state/state.json")
+UPDATE_REQUEST_PATH = os.environ.get("UPDATE_REQUEST_PATH", "/data/update-state/request.json")
+APP_VERSION = os.environ.get("APP_VERSION", "v0.1.0")
+GITHUB_REPOSITORY = os.environ.get(
+    "GITHUB_REPOSITORY", "Alexandre1116/tailscale-proton-bridge"
+)
 
 WEBUI_USERNAME = os.environ.get("WEBUI_USERNAME", "admin")
 WEBUI_PASSWORD = os.environ.get("WEBUI_PASSWORD", "")
@@ -82,6 +88,7 @@ def add_security_headers(response):
 
 SECRET_ENV_KEYS = {"TS_AUTHKEY", "PROTONVPN_PASSWORD", "WEBUI_PASSWORD"}
 ENV_FIELDS = [
+    "APP_VERSION",
     "VPN_TYPE",
     "TS_AUTHKEY",
     "TS_HOSTNAME",
@@ -95,9 +102,68 @@ ENV_FIELDS = [
     "WEBUI_ACCESS_MODE",
     "WEBUI_BIND_ADDRESS",
     "SETUP_COMPLETE",
+    "AUTO_UPDATE_ENABLED",
+    "AUTO_UPDATE_HOUR",
 ]
 
 HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
+UPDATE_HOUR_RE = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
+def update_state_defaults():
+    return {
+        "current_version": APP_VERSION,
+        "latest_version": None,
+        "latest_name": None,
+        "release_url": None,
+        "published_at": None,
+        "last_checked": None,
+        "last_auto_check": None,
+        "update_available": False,
+        "status": "waiting",
+        "error": None,
+        "last_update": None,
+        "request_id": None,
+    }
+
+
+def read_update_state():
+    state = update_state_defaults()
+    if os.path.isfile(UPDATE_STATE_PATH):
+        try:
+            with open(UPDATE_STATE_PATH, "r", encoding="utf-8") as f:
+                stored = json.load(f)
+            if isinstance(stored, dict):
+                state.update(stored)
+        except (json.JSONDecodeError, OSError, TypeError):
+            state["status"] = "error"
+            state["error"] = "Could not read updater state."
+    state["current_version"] = state.get("current_version") or APP_VERSION
+    return state
+
+
+def write_update_request(action, tag=None):
+    if action not in ("check", "install"):
+        raise ValueError("Unsupported update action")
+    request_data = {
+        "request_id": secrets.token_hex(16),
+        "action": action,
+        "tag": tag,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    }
+    request_dir = os.path.dirname(UPDATE_REQUEST_PATH) or "."
+    os.makedirs(request_dir, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".update-request.", dir=request_dir, text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(request_data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, UPDATE_REQUEST_PATH)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+    return request_data
 
 
 def require_auth(view):
@@ -289,6 +355,8 @@ def build_context(env_values, files_present):
         "vpn_type": env_values.get("VPN_TYPE", "auto"),
         "ts_hostname": env_values.get("TS_HOSTNAME", ""),
         "status_update_interval": STATUS_UPDATE_INTERVAL,
+        "update_state": read_update_state(),
+        "github_repository": GITHUB_REPOSITORY,
     }
 
 
@@ -354,6 +422,8 @@ def save():
         "WEBUI_PROTOCOL": request.form.get("webui_protocol", "http").strip().lower(),
         "WEBUI_ACCESS_MODE": request.form.get("webui_access_mode", "all").strip().lower(),
         "WEBUI_BIND_ADDRESS": request.form.get("webui_bind_address", "0.0.0.0").strip(),
+        "AUTO_UPDATE_ENABLED": "1" if request.form.get("auto_update_enabled") == "1" else "0",
+        "AUTO_UPDATE_HOUR": request.form.get("auto_update_hour", "03:00").strip(),
     }
 
     if updates["WEBUI_PROTOCOL"] not in ("http", "https"):
@@ -364,6 +434,9 @@ def save():
         return redirect(url_for(error_target))
     if updates["WEBUI_ACCESS_MODE"] == "tailnet" and updates["WEBUI_BIND_ADDRESS"] == "0.0.0.0":
         flash("In tailnet mode, set WEBUI_BIND_ADDRESS to the host's Tailscale IP.", "error")
+        return redirect(url_for(error_target))
+    if not UPDATE_HOUR_RE.fullmatch(updates["AUTO_UPDATE_HOUR"]):
+        flash("AUTO_UPDATE_HOUR must use the HH:MM format.", "error")
         return redirect(url_for(error_target))
 
     for key, value in updates.items():
@@ -424,6 +497,41 @@ def save():
 @require_auth
 def api_status():
     return jsonify(read_status())
+
+
+@app.route("/api/updates", methods=["GET"])
+@require_auth
+def api_updates():
+    return jsonify(read_update_state())
+
+
+@app.route("/api/updates/check", methods=["POST"])
+@require_auth
+def api_updates_check():
+    token = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
+    if not token or not hmac.compare_digest(token, session.get("csrf", "")):
+        abort(400, "Invalid CSRF token. Reload the page and try again.")
+    try:
+        request_data = write_update_request("check")
+    except OSError:
+        return jsonify({"error": "Updater state directory is not writable."}), 503
+    return jsonify({"queued": True, "request_id": request_data["request_id"]}), 202
+
+
+@app.route("/api/updates/install", methods=["POST"])
+@require_auth
+def api_updates_install():
+    token = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
+    if not token or not hmac.compare_digest(token, session.get("csrf", "")):
+        abort(400, "Invalid CSRF token. Reload the page and try again.")
+    tag = request.form.get("tag", "").strip() or None
+    if tag and not re.fullmatch(r"v?[0-9]+(?:\.[0-9]+){2}(?:[-.][0-9A-Za-z.-]+)?", tag):
+        abort(400, "Invalid release tag.")
+    try:
+        request_data = write_update_request("install", tag=tag)
+    except OSError:
+        return jsonify({"error": "Updater state directory is not writable."}), 503
+    return jsonify({"queued": True, "request_id": request_data["request_id"]}), 202
 
 
 if __name__ == "__main__":

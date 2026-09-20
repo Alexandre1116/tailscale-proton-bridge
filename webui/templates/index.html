@@ -6,7 +6,7 @@
   <h2>Configuration</h2>
   <p class="lede">Changes made here update files on disk. Restart both containers after saving to apply them.</p>
 
-  <form method="post" action="{{ url_for('save') }}" enctype="multipart/form-data">
+  <form id="configuration-form" method="post" action="{{ url_for('save') }}" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
     <fieldset>
@@ -104,7 +104,7 @@
   </form>
 </div>
 
-<div class="panel">
+  <div class="panel">
   <h2>Apply changes</h2>
   <p class="lede" style="margin-bottom:0">
     Saving here only updates <code>.env</code> and <code>./vpn</code>. The bridge
@@ -113,6 +113,37 @@
   <p style="font-family: var(--font-mono); font-size: 0.85rem; margin: 10px 0 0;">
     docker compose up -d --build vpn-tailscale-bridge webui
   </p>
-</div>
+  </div>
+
+  <div class="panel update-panel" id="update-panel" data-update-url="{{ url_for('api_updates') }}" data-check-url="{{ url_for('api_updates_check') }}" data-install-url="{{ url_for('api_updates_install') }}" data-csrf-token="{{ csrf_token }}">
+    <div class="panel-heading">
+      <div>
+        <span class="eyebrow">Software lifecycle</span>
+        <h2>Updates</h2>
+      </div>
+      <span class="update-status-badge" id="update-status-badge">Checking</span>
+    </div>
+    <p class="lede">Releases are read from <a href="https://github.com/{{ github_repository }}/releases" target="_blank" rel="noopener">GitHub</a>. You can install a release manually with one click, or enable a daily check.</p>
+    <div class="update-summary">
+      <div><span>Installed</span><strong id="update-current-version">{{ update_state.current_version }}</strong></div>
+      <div><span>Latest release</span><strong id="update-latest-version">{{ update_state.latest_version or 'Not checked yet' }}</strong></div>
+      <div><span>Last check</span><strong id="update-last-checked">{{ update_state.last_checked or 'Not checked yet' }}</strong></div>
+    </div>
+    <div class="update-message" id="update-message" role="status" aria-live="polite">
+      {% if update_state.error %}{{ update_state.error }}{% elif update_state.update_available %}A new release is ready to install.{% else %}No update detected.{% endif %}
+    </div>
+    <div class="actions update-actions">
+      <button type="button" class="btn ghost" id="check-updates">Check now</button>
+      <button type="button" class="btn" id="install-update" {% if not update_state.update_available %}disabled{% endif %}>Install available update</button>
+      {% if update_state.release_url %}<a class="btn ghost" id="release-notes" href="{{ update_state.release_url }}" target="_blank" rel="noopener">Release notes</a>{% else %}<a class="btn ghost" id="release-notes" href="#" target="_blank" rel="noopener" hidden>Release notes</a>{% endif %}
+    </div>
+    <fieldset class="auto-update-settings">
+      <legend>Automatic updates</legend>
+      <label class="checkbox-label"><input type="checkbox" name="auto_update_enabled" value="1" form="configuration-form" {% if env.AUTO_UPDATE_ENABLED == '1' %}checked{% endif %}> Check daily and install new stable releases automatically</label>
+      <label for="auto-update-hour">Daily check time <span class="hint">local time on the Docker host</span></label>
+      <input id="auto-update-hour" type="time" name="auto_update_hour" value="{{ env.AUTO_UPDATE_HOUR or '03:00' }}" form="configuration-form" step="60">
+      <p class="hint">Save the configuration below to apply this schedule. Automatic updates stop if local Git changes are detected.</p>
+    </fieldset>
+  </div>
 
 {% endblock %}
