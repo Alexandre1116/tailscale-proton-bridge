@@ -32,3 +32,27 @@ def test_scheduled_check_requires_enabled_setting(monkeypatch):
     assert update_service.scheduled_check_due({}, {"AUTO_UPDATE_ENABLED": "0", "AUTO_UPDATE_HOUR": "04:30"}) is False
     assert update_service.scheduled_check_due({}, {"AUTO_UPDATE_ENABLED": "1", "AUTO_UPDATE_HOUR": "04:30"}) is True
     assert update_service.scheduled_check_due({"last_auto_check": "2026-09-17"}, {"AUTO_UPDATE_ENABLED": "1", "AUTO_UPDATE_HOUR": "04:30"}) is False
+
+
+def test_install_rebuilds_the_updater_service(monkeypatch, tmp_path):
+    monkeypatch.setattr(update_service, "WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setattr(update_service, "update_env_version", lambda tag: None)
+    commands = []
+
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def fake_run(command):
+        commands.append(command)
+        return Result()
+
+    monkeypatch.setattr(update_service, "run", fake_run)
+    state = {"latest_version": "v0.2.0"}
+
+    update_service.install_release(state)
+
+    compose_command = commands[-1]
+    assert compose_command[-3:] == ["vpn-tailscale-bridge", "webui", "updater"]

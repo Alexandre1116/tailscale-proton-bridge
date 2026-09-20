@@ -209,7 +209,7 @@ def install_release(state, requested_tag=None):
         "docker", "compose", "--project-directory", WORKSPACE,
         "--env-file", os.path.join(WORKSPACE, ".env"),
         "-f", os.path.join(WORKSPACE, "docker-compose.yml"),
-        "up", "-d", "--build", "vpn-tailscale-bridge", "webui",
+        "up", "-d", "--build", "vpn-tailscale-bridge", "webui", "updater",
     ]
     result = run(compose)
     if result.returncode != 0:
