@@ -85,7 +85,7 @@ def fetch_latest_release():
 def default_state():
     env = read_dotenv()
     return {
-        "current_version": env.get("APP_VERSION", os.environ.get("APP_VERSION", "v0.1.0")),
+        "current_version": env.get("APP_VERSION", os.environ.get("APP_VERSION", "v0.1.2")),
         "latest_version": None,
         "latest_name": None,
         "release_url": None,

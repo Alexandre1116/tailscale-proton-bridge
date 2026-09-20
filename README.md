@@ -8,7 +8,7 @@
 [![Proton VPN](https://img.shields.io/badge/Proton_VPN-WireGuard_%2F_OpenVPN-purple?logo=protonvpn)](https://protonvpn.com)
 [![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-brightgreen)](#)
 
-Current release: [`v0.1.1`](https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.1.1)
+Current release: [`v0.1.2`](https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.1.2)
 
 Route all your private Tailscale network traffic through **Proton VPN** (including the **100% Free tier**) via a lightweight Docker exit node.
 
@@ -172,7 +172,7 @@ set the absolute project path in `.env` so Docker Compose can resolve build and
 bind-mount paths from the updater container:
 
 ```dotenv
-APP_VERSION=v0.1.0
+APP_VERSION=v0.1.2
 GITHUB_REPOSITORY=Alexandre1116/tailscale-proton-bridge
 AUTO_UPDATE_ENABLED=0
 AUTO_UPDATE_HOUR=03:00

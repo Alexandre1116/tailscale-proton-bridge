@@ -103,7 +103,7 @@ services:
       - WEBUI_BIND_ADDRESS=${WEBUI_BIND_ADDRESS:-0.0.0.0}
       - WEBUI_ALLOWED_CIDRS=${WEBUI_ALLOWED_CIDRS:-}
       - STATUS_UPDATE_INTERVAL=${STATUS_UPDATE_INTERVAL:-2}
-      - APP_VERSION=${APP_VERSION:-v0.1.0}
+      - APP_VERSION=${APP_VERSION:-v0.1.2}
       - GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-Alexandre1116/tailscale-proton-bridge}
       - UPDATE_STATE_PATH=/data/update-state/state.json
       - UPDATE_REQUEST_PATH=/data/update-state/request.json
@@ -137,7 +137,7 @@ services:
       - UPDATE_STATE_PATH=/state/state.json
       - UPDATE_REQUEST_PATH=/state/request.json
       - GITHUB_REPOSITORY=${GITHUB_REPOSITORY:-Alexandre1116/tailscale-proton-bridge}
-      - APP_VERSION=${APP_VERSION:-v0.1.0}
+      - APP_VERSION=${APP_VERSION:-v0.1.2}
       - UPDATE_POLL_INTERVAL=${UPDATE_POLL_INTERVAL:-30}
     healthcheck:
       test: ["CMD", "python3", "-c", "import json; json.load(open('/state/state.json'))"]

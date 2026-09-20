@@ -29,7 +29,7 @@ STATUS_FILE = os.environ.get("STATUS_FILE", "/var/run/bridge-status/status.json"
 TRAFFIC_FILE = os.environ.get("TRAFFIC_FILE", "/var/run/bridge-status/traffic.json")
 UPDATE_STATE_PATH = os.environ.get("UPDATE_STATE_PATH", "/data/update-state/state.json")
 UPDATE_REQUEST_PATH = os.environ.get("UPDATE_REQUEST_PATH", "/data/update-state/request.json")
-APP_VERSION = os.environ.get("APP_VERSION", "v0.1.0")
+APP_VERSION = os.environ.get("APP_VERSION", "v0.1.2")
 GITHUB_REPOSITORY = os.environ.get(
     "GITHUB_REPOSITORY", "Alexandre1116/tailscale-proton-bridge"
 )
