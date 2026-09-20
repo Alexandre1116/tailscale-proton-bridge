@@ -8,7 +8,7 @@
 [![Proton VPN](https://img.shields.io/badge/Proton_VPN-WireGuard_%2F_OpenVPN-purple?logo=protonvpn)](https://protonvpn.com)
 [![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-brightgreen)](#)
 
-Pré-release atual: `v0.1.0-beta.2`
+Release atual: [`v0.1.1`](https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.1.1)
 
 Este projeto permite criar um container Docker que funciona como uma ponte (bridge) entre o **Proton VPN** (incluindo o plano **Free/Gratuito**) e a sua rede privada **Tailscale (Tailnet)**, atuando como um **Exit Node** (Nó de Saída). 
 
@@ -223,7 +223,7 @@ credenciais no `.env`, por isso não publique esta porta diretamente na Internet
 
 | Plataforma | Estado | Notas |
 |---|---|---|
-| Debian/Ubuntu Linux com Docker Engine | Suportada | Requer `/dev/net/tun`, forwarding IPv4 e permissões de rede. |
+| Debian/Ubuntu Linux com Docker Engine | Suportada | Requer `/dev/net/tun`, forwarding IPv4/IPv6 e permissões de rede. |
 | Synology DSM 7.x com Container Manager | Suportada com validação | Confirmar `/dev/net/tun`, o backend iptables disponível e a arquitetura do NAS. |
 | Raspberry Pi 4/5, Raspberry Pi OS 64-bit | Suportada | A imagem CI cobre `arm64`; testar o desempenho do OpenVPN no modelo usado. |
 | Docker Desktop em Windows/macOS | Não suportada para o bridge | A UI pode ser construída, mas o exit node requer o dispositivo TUN e rede Linux no anfitrião. |

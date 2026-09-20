@@ -28,6 +28,31 @@ if [ "${#STATUS_UPDATE_INTERVAL}" -gt 7 ] || {
     exit 1
 fi
 
+configure_forwarding() {
+    echo "Configuring IP forwarding before starting Tailscale..."
+
+    if ! sysctl -w net.ipv4.ip_forward=1 2>/dev/null; then
+        if [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" != "1" ]; then
+            echo "Error: could not enable net.ipv4.ip_forward." >&2
+            exit 1
+        fi
+    fi
+
+    # Tailscale checks IPv6 forwarding too. IPv6 itself stays disabled and the
+    # IPv6 FORWARD chain is dropped, so this does not create an unprotected path.
+    if ! sysctl -w net.ipv6.conf.all.forwarding=1 2>/dev/null; then
+        if [ "$(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null || echo 0)" != "1" ]; then
+            echo "Warning: could not enable net.ipv6.conf.all.forwarding; the console may show a warning." >&2
+        fi
+    fi
+    sysctl -w net.ipv6.conf.default.forwarding=1 2>/dev/null || true
+
+    sysctl -w net.ipv6.conf.all.disable_ipv6=1 2>/dev/null || true
+    sysctl -w net.ipv6.conf.default.disable_ipv6=1 2>/dev/null || true
+}
+
+configure_forwarding
+
 # Função de limpeza para encerramento gracioso
 cleanup() {
     echo "Sinal de paragem recebido. A encerrar serviços..."
@@ -349,25 +374,8 @@ if ! ip addr show dev "$VPN_INTERFACE" 2>/dev/null | grep -q "inet "; then
 fi
 echo "Conexão VPN estabelecida com sucesso na interface $VPN_INTERFACE!"
 
-# 4. Configurar Encaminhamento e Regras do Firewall (iptables NAT)
-echo "A ativar o IP forwarding (IPv4)..."
-if ! sysctl -w net.ipv4.ip_forward=1 2>/dev/null; then
-    if [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" != "1" ]; then
-        echo "Erro: não foi possível ativar net.ipv4.ip_forward."
-        exit 1
-    fi
-    echo "Aviso: net.ipv4.ip_forward já estava ativo; a escrita foi recusada pelo ambiente."
-fi
-
-# Desativar IPv6 por completo para prevenir fugas (leaks) de tráfego fora do túnel:
-# a Proton VPN (Free) e a generalidade dos servidores WireGuard/OpenVPN gratuitos não
-# encaminham IPv6, pelo que deixar o forwarding de IPv6 ativo permitiria que os clientes
-# da Tailnet saíssem para a internet em IPv6 sem passar pela VPN.
-echo "A desativar IPv6 (prevenção de fugas de tráfego)..."
-sysctl -w net.ipv6.conf.all.disable_ipv6=1 2>/dev/null || true
-sysctl -w net.ipv6.conf.default.disable_ipv6=1 2>/dev/null || true
-sysctl -w net.ipv6.conf.all.forwarding=0 2>/dev/null || true
-
+# 4. Configurar Regras do Firewall (iptables NAT). O forwarding foi ativado
+# antes do tailscaled para que o Tailscale veja o estado correto desde o arranque.
 echo "A aplicar regras de iptables para o encaminhamento..."
 # Resetar regras de encaminhamento
 iptables -F FORWARD || true

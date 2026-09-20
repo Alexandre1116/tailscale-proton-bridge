@@ -20,6 +20,10 @@ services:
       # Pré-definidos aqui como reforço; o entrypoint também os define via sysctl -w
       - net.ipv4.ip_forward=1
       - net.ipv4.conf.all.src_valid_mark=1
+      # Tailscale checks both forwarding sysctls for exit nodes.
+      # IPv6 traffic remains disabled and blocked to avoid VPN leaks.
+      - net.ipv6.conf.all.forwarding=1
+      - net.ipv6.conf.default.forwarding=1
       - net.ipv6.conf.all.disable_ipv6=1
       - net.ipv6.conf.default.disable_ipv6=1
 

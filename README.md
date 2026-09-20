@@ -8,7 +8,7 @@
 [![Proton VPN](https://img.shields.io/badge/Proton_VPN-WireGuard_%2F_OpenVPN-purple?logo=protonvpn)](https://protonvpn.com)
 [![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-brightgreen)](#)
 
-Current release: [`v0.1.0`](https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.1.0)
+Current release: [`v0.1.1`](https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.1.1)
 
 Route all your private Tailscale network traffic through **Proton VPN** (including the **100% Free tier**) via a lightweight Docker exit node.
 
@@ -235,7 +235,7 @@ credentials and `.env`, so do not publish this port directly to the Internet.
 
 | Platform | Status | Notes |
 |---|---|---|
-| Debian/Ubuntu Linux with Docker Engine | Supported | Requires `/dev/net/tun`, IPv4 forwarding, and network permissions. |
+| Debian/Ubuntu Linux with Docker Engine | Supported | Requires `/dev/net/tun`, IPv4/IPv6 forwarding, and network permissions. |
 | Synology DSM 7.x with Container Manager | Supported with validation | Confirm `/dev/net/tun`, the available iptables backend, and the NAS architecture. |
 | Raspberry Pi 4/5, 64-bit Raspberry Pi OS | Supported | CI covers `arm64`; test OpenVPN performance on the target model. |
 | Docker Desktop on Windows/macOS | Bridge not supported | The UI may build, but the exit node needs the TUN device and Linux host networking. |
