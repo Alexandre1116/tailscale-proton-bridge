@@ -289,6 +289,26 @@ process_pending_profiles() {
     done
 }
 
+if ! sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
+    [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" = 1 ] || exit 1
+fi
+sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
+sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
+if [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo 0)" != "1" ] || \
+   [ "$(sysctl -n net.ipv6.conf.default.disable_ipv6 2>/dev/null || echo 0)" != "1" ]; then
+    echo "IPv6 could not be disabled; refusing to start the multi-profile dataplane" >&2
+    exit 1
+fi
+iptables -F FORWARD || true
+iptables -P FORWARD DROP
+iptables -t nat -F POSTROUTING || true
+iptables -t mangle -F PREROUTING || true
+iptables -t mangle -F OUTPUT || true
+if ! ip6tables -F FORWARD || ! ip6tables -P FORWARD DROP; then
+    echo "Could not install the IPv6 forwarding kill switch" >&2
+    exit 1
+fi
+
 for ((i = 0; i < PROFILE_COUNT; i++)); do
     profile_id="${PROFILE_IDS[$i]}"
     directory="$PROFILE_ROOT/$profile_id"
@@ -408,26 +428,6 @@ for ((i = 0; i < PROFILE_COUNT; i++)); do
     activate_profile "$i"
     write_status
 done
-
-if ! sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
-    [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" = 1 ] || exit 1
-fi
-sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
-sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
-if [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo 0)" != "1" ] || \
-   [ "$(sysctl -n net.ipv6.conf.default.disable_ipv6 2>/dev/null || echo 0)" != "1" ]; then
-    echo "IPv6 could not be disabled; refusing to start the multi-profile dataplane" >&2
-    exit 1
-fi
-iptables -F FORWARD || true
-iptables -P FORWARD DROP
-iptables -t nat -F POSTROUTING || true
-iptables -t mangle -F PREROUTING || true
-iptables -t mangle -F OUTPUT || true
-if ! ip6tables -F FORWARD || ! ip6tables -P FORWARD DROP; then
-    echo "Could not install the IPv6 forwarding kill switch" >&2
-    exit 1
-fi
 
 process_pending_profiles
 for ((i = 0; i < PROFILE_COUNT; i++)); do

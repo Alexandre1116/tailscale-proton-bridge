@@ -69,3 +69,11 @@ def test_multi_profile_authentication_stays_alive_until_the_user_finishes():
     assert 'PROFILE_UP_PIDS[$i]="$up_pid"' in supervisor
     assert "process_pending_profiles" in supervisor
     assert 'kill -TERM "$up_pid"' not in supervisor
+
+
+def test_multi_profile_kill_switch_precedes_exit_node_advertisement():
+    supervisor = (PROJECT_ROOT / "multi-entrypoint.sh").read_text(encoding="utf-8")
+    advertise_exit_node = 'tailscale --socket="${TS_SOCKETS[$i]}" up --authkey='
+
+    assert supervisor.index("iptables -P FORWARD DROP") < supervisor.index(advertise_exit_node)
+    assert supervisor.index("ip6tables -P FORWARD DROP") < supervisor.index(advertise_exit_node)
