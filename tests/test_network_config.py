@@ -21,6 +21,15 @@ def test_tailscale_underlay_bypasses_vpn_only_for_its_udp_port():
     assert '--port="$TS_PORT"' in entrypoint
     assert 'ipproto udp sport "$TS_PORT" lookup "$UNDERLAY_TABLE"' in entrypoint
     assert entrypoint.index("configure_tailscale_underlay\n") < entrypoint.index("tailscale up")
+    # Under set -e a failing rule must not abort before 'tailscale up'.
+    assert '! ip rule add priority "$UNDERLAY_RULE_PRIORITY"' in entrypoint
+
+
+def test_compose_does_not_force_an_apparmor_profile_by_default():
+    compose = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "${BRIDGE_SECURITY_OPT:-no-new-privileges:true}" in compose
+    assert "apparmor=${" not in compose
 
 
 def test_compose_exposes_both_forwarding_sysctls():

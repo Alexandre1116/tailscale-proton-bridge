@@ -172,7 +172,7 @@ docker compose up -d --build
 
 ### Docker dentro de um container LXC (Proxmox)
 
-Se a bridge não arrancar em Docker-in-LXC por causa do AppArmor, defina `BRIDGE_APPARMOR_PROFILE=unconfined` no `.env` em vez de editar o `docker-compose.yml`. Alterações locais bloqueiam o updater.
+Se a bridge não arrancar em Docker-in-LXC por causa do AppArmor, defina `BRIDGE_SECURITY_OPT=apparmor=unconfined` no `.env` em vez de editar o `docker-compose.yml`. Alterações locais bloqueiam o updater.
 
 ### Ligações diretas do Tailscale
 

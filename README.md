@@ -187,7 +187,7 @@ The updater refuses to install over local Git changes, and refuses to run when
 ### Docker inside an LXC container (Proxmox)
 
 If the bridge fails to start under Docker-in-LXC because of AppArmor, set
-`BRIDGE_APPARMOR_PROFILE=unconfined` in `.env` instead of editing
+`BRIDGE_SECURITY_OPT=apparmor=unconfined` in `.env` instead of editing
 `docker-compose.yml`. Local edits block the updater.
 
 ### Direct Tailscale connections

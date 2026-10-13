@@ -409,9 +409,15 @@ configure_tailscale_underlay() {
         return 0
     fi
     echo "A encaminhar o UDP do Tailscale (porta $TS_PORT) pela rede local para ligações diretas..."
-    ip route replace default via "$UNDERLAY_GATEWAY" dev "$UNDERLAY_DEVICE" table "$UNDERLAY_TABLE"
     while ip rule del priority "$UNDERLAY_RULE_PRIORITY" 2>/dev/null; do :; done
-    ip rule add priority "$UNDERLAY_RULE_PRIORITY" ipproto udp sport "$TS_PORT" lookup "$UNDERLAY_TABLE"
+    # Uma falha aqui não pode derrubar o exit node: sem a regra, o Tailscale
+    # continua a funcionar através da VPN e dos relays DERP.
+    if ! ip route replace default via "$UNDERLAY_GATEWAY" dev "$UNDERLAY_DEVICE" table "$UNDERLAY_TABLE" ||
+        ! ip rule add priority "$UNDERLAY_RULE_PRIORITY" ipproto udp sport "$TS_PORT" lookup "$UNDERLAY_TABLE"; then
+        echo "Aviso: não foi possível configurar a rota direta do Tailscale; vai usar relays DERP." >&2
+        ip rule del priority "$UNDERLAY_RULE_PRIORITY" 2>/dev/null || true
+        ip route flush table "$UNDERLAY_TABLE" 2>/dev/null || true
+    fi
 }
 
 configure_tailscale_underlay
