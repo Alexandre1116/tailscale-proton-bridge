@@ -1,4 +1,7 @@
+import os
+import stat
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -34,6 +37,40 @@ def test_scheduled_check_requires_enabled_setting(monkeypatch):
     assert update_service.scheduled_check_due({}, {"AUTO_UPDATE_ENABLED": "0", "AUTO_UPDATE_HOUR": "04:30"}) is False
     assert update_service.scheduled_check_due({}, {"AUTO_UPDATE_ENABLED": "1", "AUTO_UPDATE_HOUR": "04:30"}) is True
     assert update_service.scheduled_check_due({"last_auto_check": "2026-09-17"}, {"AUTO_UPDATE_ENABLED": "1", "AUTO_UPDATE_HOUR": "04:30"}) is False
+
+
+@pytest.mark.skipif(not hasattr(os, "chown"), reason="POSIX permissions only")
+def test_state_is_readable_by_the_web_ui(monkeypatch, tmp_path):
+    state_path = tmp_path / "state" / "state.json"
+    monkeypatch.setattr(update_service, "STATE_PATH", str(state_path))
+    monkeypatch.setattr(update_service, "STATE_UID", os.getuid())
+    monkeypatch.setattr(update_service, "STATE_GID", os.getgid())
+
+    update_service.prepare_state_dir()
+    update_service.write_state({"status": "up_to_date"})
+
+    assert stat.S_IMODE(os.stat(state_path.parent).st_mode) == 0o770
+    assert stat.S_IMODE(os.stat(state_path).st_mode) == 0o644
+
+
+def test_prepare_state_dir_survives_chown_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state" / "state.json"))
+
+    def deny(*args):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(update_service.os, "chown", deny, raising=False)
+
+    update_service.prepare_state_dir()
+
+    assert (tmp_path / "state").is_dir()
+
+
+def test_web_ui_image_uses_the_updater_state_ids():
+    dockerfile = (Path(__file__).resolve().parents[1] / "webui" / "Dockerfile").read_text(encoding="utf-8")
+
+    assert f"addgroup -S -g {update_service.STATE_GID} webui" in dockerfile
+    assert f"adduser -S -u {update_service.STATE_UID} -G webui webui" in dockerfile
 
 
 def test_install_requires_matching_host_project_path(monkeypatch, tmp_path):

@@ -137,7 +137,7 @@ def read_update_state():
                 state.update(stored)
         except (json.JSONDecodeError, OSError, TypeError):
             state["status"] = "error"
-            state["error"] = "Could not read updater state."
+            state["error"] = "Could not read updater state. Restart the updater so it can fix the permissions of updater/state."
     state["current_version"] = state.get("current_version") or APP_VERSION
     return state
 
@@ -514,7 +514,7 @@ def api_updates_check():
     try:
         request_data = write_update_request("check")
     except OSError:
-        return jsonify({"error": "Updater state directory is not writable."}), 503
+        return jsonify({"error": "The Web UI cannot write to updater/state. Restart the updater so it can fix the directory permissions."}), 503
     return jsonify({"queued": True, "request_id": request_data["request_id"]}), 202
 
 
@@ -530,7 +530,7 @@ def api_updates_install():
     try:
         request_data = write_update_request("install", tag=tag)
     except OSError:
-        return jsonify({"error": "Updater state directory is not writable."}), 503
+        return jsonify({"error": "The Web UI cannot write to updater/state. Restart the updater so it can fix the directory permissions."}), 503
     return jsonify({"queued": True, "request_id": request_data["request_id"]}), 202
 
 

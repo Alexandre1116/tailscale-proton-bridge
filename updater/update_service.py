@@ -22,6 +22,9 @@ STATE_PATH = os.environ.get("UPDATE_STATE_PATH", "/state/state.json")
 REQUEST_PATH = os.environ.get("UPDATE_REQUEST_PATH", "/state/request.json")
 REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "Alexandre1116/tailscale-proton-bridge")
 POLL_INTERVAL = max(int(os.environ.get("UPDATE_POLL_INTERVAL", "30")), 5)
+# The Web UI runs unprivileged; it must read state.json and write request.json.
+STATE_UID = int(os.environ.get("UPDATE_STATE_UID", "100"))
+STATE_GID = int(os.environ.get("UPDATE_STATE_GID", "101"))
 TAG_RE = re.compile(r"^v?[0-9]+(?:\.[0-9]+){2}(?:[-.][0-9A-Za-z.-]+)?$")
 VERSION_RE = re.compile(r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$")
 
@@ -112,6 +115,16 @@ def read_state():
     return state
 
 
+def prepare_state_dir():
+    state_dir = os.path.dirname(STATE_PATH) or "."
+    os.makedirs(state_dir, exist_ok=True)
+    try:
+        os.chown(state_dir, STATE_UID, STATE_GID)
+        os.chmod(state_dir, 0o770)
+    except (AttributeError, OSError) as exc:
+        print(f"Warning: could not share {state_dir} with the Web UI: {exc}", flush=True)
+
+
 def write_state(state):
     state_dir = os.path.dirname(STATE_PATH) or "."
     os.makedirs(state_dir, exist_ok=True)
@@ -122,6 +135,8 @@ def write_state(state):
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
+        # mkstemp creates 0600 files, which the unprivileged Web UI cannot read.
+        os.chmod(temp_path, 0o644)
         os.replace(temp_path, STATE_PATH)
     finally:
         if os.path.exists(temp_path):
@@ -263,6 +278,7 @@ def scheduled_check_due(state, env):
 
 
 def main():
+    prepare_state_dir()
     state = read_state()
     write_state(state)
     # Populate the banner soon after startup; subsequent automatic checks are daily.
