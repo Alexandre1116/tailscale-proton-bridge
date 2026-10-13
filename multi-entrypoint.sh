@@ -289,6 +289,19 @@ process_pending_profiles() {
     done
 }
 
+has_active_profile() {
+    local i
+    for ((i = 0; i < PROFILE_COUNT; i++)); do
+        if [ "${PROFILE_STATES[$i]}" = connected ] || [ "${PROFILE_STATES[$i]}" = degraded ]; then
+            return 0
+        fi
+        if [ "${PROFILE_STATES[$i]}" = pending ] && kill -0 "${PROFILE_UP_PIDS[$i]:-}" 2>/dev/null; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 if ! sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
     [ "$(sysctl -n net.ipv4.ip_forward 2>/dev/null || echo 0)" = 1 ] || exit 1
 fi
@@ -433,6 +446,7 @@ process_pending_profiles
 for ((i = 0; i < PROFILE_COUNT; i++)); do
     configure_profile_firewall "$i"
 done
+write_status
 
 pending_auth=false
 for ((i = 0; i < PROFILE_COUNT; i++)); do
@@ -461,6 +475,10 @@ TELEMETRY_PID=$!
 
 while true; do
     process_pending_profiles
+    if ! has_active_profile; then
+        echo "No connected profile or pending authentication remains; restarting the container" >&2
+        exit 1
+    fi
     for ((i = 0; i < PROFILE_COUNT; i++)); do
         [ "${PROFILE_STATES[$i]}" = connected ] || [ "${PROFILE_STATES[$i]}" = degraded ] || continue
         if ! kill -0 "${TS_PIDS[$i]}" 2>/dev/null || \
