@@ -221,7 +221,7 @@ def install_release(state, requested_tag=None):
             "project path on the Docker host, then recreate the updater"
         )
 
-    if collect_update(state):
+    if collect_update(state) == "running":
         raise RuntimeError("An update is already running")
 
     state["status"] = "installing"
@@ -286,13 +286,16 @@ def helper_state():
 
 
 def collect_update(state):
-    """Record a finished helper's result. Returns True while it is still running."""
+    """Record a finished helper's result.
+
+    Returns None without a helper, "running" while it runs, else "collected".
+    """
     helper = helper_state()
     if helper is None:
-        return False
+        return None
     running, exit_code = helper
     if running:
-        return True
+        return "running"
     if exit_code == 0:
         state["update_available"] = False
         state["status"] = "updated"
@@ -305,7 +308,7 @@ def collect_update(state):
         state["error"] = (output or f"Docker Compose update failed with exit code {exit_code}")[-500:]
     write_state(state)
     run(["docker", "rm", "--force", UPDATE_HELPER])
-    return False
+    return "collected"
 
 
 def handle_request(state, request_data):
@@ -343,12 +346,13 @@ def main():
     prepare_state_dir()
     state = read_state()
     write_state(state)
-    # Populate the banner soon after startup; subsequent automatic checks are daily.
-    if not collect_update(state):
+    # Populate the banner soon after startup; subsequent automatic checks are
+    # daily. Skip it after an install so its updated/error result stays visible.
+    if collect_update(state) is None:
         check_release(state)
     while True:
         state = read_state()
-        if collect_update(state):
+        if collect_update(state) == "running":
             time.sleep(POLL_INTERVAL)
             continue
         state = read_state()

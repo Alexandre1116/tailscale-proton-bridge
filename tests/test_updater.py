@@ -167,7 +167,7 @@ def test_collect_update_records_success_and_removes_helper(monkeypatch, tmp_path
     monkeypatch.setattr(update_service, "run", fake_docker(commands, helper="false 0"))
     state = {"status": "installing", "update_available": True}
 
-    assert update_service.collect_update(state) is False
+    assert update_service.collect_update(state) == "collected"
 
     assert state["status"] == "updated"
     assert state["update_available"] is False
@@ -180,7 +180,7 @@ def test_collect_update_reports_compose_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(update_service, "run", fake_docker(commands, helper="false 1", logs="build failed"))
     state = {"status": "installing"}
 
-    assert update_service.collect_update(state) is False
+    assert update_service.collect_update(state) == "collected"
 
     assert state["status"] == "error"
     assert state["error"] == "build failed"
@@ -192,7 +192,40 @@ def test_collect_update_waits_for_a_running_helper(monkeypatch, tmp_path):
     monkeypatch.setattr(update_service, "run", fake_docker(commands, helper="true 0"))
     state = {"status": "installing"}
 
-    assert update_service.collect_update(state) is True
+    assert update_service.collect_update(state) == "running"
 
     assert state["status"] == "installing"
     assert not any(command[:2] == ["docker", "rm"] for command in commands)
+
+
+def test_startup_keeps_a_collected_update_result(monkeypatch, tmp_path):
+    monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setattr(update_service, "WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(update_service, "prepare_state_dir", lambda: None)
+    helper = {"inspect": "false 1"}
+    docker = fake_docker([], logs="build failed")
+
+    def fake_run(command):
+        if command[:2] == ["docker", "rm"]:
+            helper["inspect"] = None
+        if command[:2] == ["docker", "inspect"] and command[-1] == update_service.UPDATE_HELPER:
+            return Result(1) if helper["inspect"] is None else Result(stdout=helper["inspect"])
+        return docker(command)
+
+    monkeypatch.setattr(update_service, "run", fake_run)
+    checks = []
+    monkeypatch.setattr(update_service, "check_release", lambda state, auto_check=False: checks.append(state))
+
+    class Stop(Exception):
+        pass
+
+    def stop(seconds):
+        raise Stop
+
+    monkeypatch.setattr(update_service.time, "sleep", stop)
+
+    with pytest.raises(Stop):
+        update_service.main()
+
+    assert checks == []
+    assert update_service.read_state()["error"] == "build failed"
