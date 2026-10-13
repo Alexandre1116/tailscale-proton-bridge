@@ -17,7 +17,7 @@ mkdir -p "$STATUS_DIR" /var/lib/tailscale /var/run/tailscale /tmp
 
 declare -a PROFILE_IDS PROFILE_NAMES PROFILE_TYPES PROFILE_HOSTNAMES PROFILE_EXTRAS
 declare -a VPN_INTERFACES TS_INTERFACES TS_SOCKETS TS_PIDS VPN_PIDS
-declare -a PROFILE_STATES PROFILE_AUTH_URLS PROFILE_FAILURES PROFILE_TABLES
+declare -a PROFILE_STATES PROFILE_AUTH_URLS PROFILE_FAILURES PROFILE_TABLES PROFILE_UP_PIDS PROFILE_FIREWALL_CONFIGURED
 PROFILE_COUNT=0
 TELEMETRY_PID=""
 
@@ -174,6 +174,7 @@ cleanup() {
     for ((i = 0; i < PROFILE_COUNT; i++)); do
         [ -n "${TS_PIDS[$i]:-}" ] && kill -TERM "${TS_PIDS[$i]}" 2>/dev/null || true
         [ -n "${VPN_PIDS[$i]:-}" ] && kill -TERM "${VPN_PIDS[$i]}" 2>/dev/null || true
+        [ -n "${PROFILE_UP_PIDS[$i]:-}" ] && kill -TERM "${PROFILE_UP_PIDS[$i]}" 2>/dev/null || true
         if [ "${PROFILE_TYPES[$i]}" = wireguard ]; then
             wg-quick down "${VPN_INTERFACES[$i]}" 2>/dev/null || true
         fi
@@ -221,6 +222,8 @@ for metadata in "$PROFILE_ROOT"/*/profile.env; do
     PROFILE_TABLES[$PROFILE_COUNT]="$((100 + PROFILE_COUNT))"
     TS_PIDS[$PROFILE_COUNT]=""
     VPN_PIDS[$PROFILE_COUNT]=""
+    PROFILE_UP_PIDS[$PROFILE_COUNT]=""
+    PROFILE_FIREWALL_CONFIGURED[$PROFILE_COUNT]=0
     PROFILE_COUNT=$((PROFILE_COUNT + 1))
 done
 
@@ -231,6 +234,60 @@ fi
 
 rm -f "$STATUS_FILE" "$TRAFFIC_FILE"
 write_status
+
+activate_profile() {
+    local i="$1"
+    local ts_if="${TS_INTERFACES[$i]}"
+    local vpn_if="${VPN_INTERFACES[$i]}"
+    local table="${PROFILE_TABLES[$i]}"
+
+    ip route replace "100.64.0.0/10" dev "$ts_if" table "$table"
+    ip route replace default dev "$vpn_if" table "$table"
+    ip rule add iif "$ts_if" table "$table" pref "$((1000 + i))" 2>/dev/null || true
+    ip rule add fwmark "$table" table "$table" pref "$((2000 + i))" 2>/dev/null || true
+    PROFILE_STATES[$i]="connected"
+    PROFILE_AUTH_URLS[$i]=""
+}
+
+configure_profile_firewall() {
+    local i="$1"
+    [ "${PROFILE_FIREWALL_CONFIGURED[$i]:-0}" = 1 ] && return 0
+    [ "${PROFILE_STATES[$i]}" = connected ] || return 0
+
+    local ts_if="${TS_INTERFACES[$i]}"
+    local vpn_if="${VPN_INTERFACES[$i]}"
+    local mark="${PROFILE_TABLES[$i]}"
+    iptables -t mangle -A PREROUTING -i "$ts_if" -m conntrack --ctstate NEW -j CONNMARK --set-mark "$mark"
+    iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark
+    iptables -t mangle -A OUTPUT -j CONNMARK --restore-mark
+    iptables -A FORWARD -i "$ts_if" -o "$vpn_if" -j ACCEPT
+    iptables -A FORWARD -i "$vpn_if" -o "$ts_if" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -t nat -A POSTROUTING -o "$vpn_if" -j MASQUERADE
+    PROFILE_FIREWALL_CONFIGURED[$i]=1
+}
+
+process_pending_profiles() {
+    local i up_pid
+    for ((i = 0; i < PROFILE_COUNT; i++)); do
+        [ "${PROFILE_STATES[$i]}" = pending ] || continue
+        up_pid="${PROFILE_UP_PIDS[$i]:-}"
+        [ -n "$up_pid" ] || continue
+        PROFILE_AUTH_URLS[$i]=$(grep -oE "https://login\.tailscale\.com/a/[A-Za-z0-9]+" "/tmp/bridge-${PROFILE_IDS[$i]}-up.log" 2>/dev/null | head -n1 || true)
+        if kill -0 "$up_pid" 2>/dev/null; then
+            continue
+        fi
+        if wait "$up_pid"; then
+            PROFILE_UP_PIDS[$i]=""
+            activate_profile "$i"
+            configure_profile_firewall "$i"
+            echo "Profile ${PROFILE_IDS[$i]} authenticated and is now connected"
+        else
+            PROFILE_UP_PIDS[$i]=""
+            PROFILE_STATES[$i]="error"
+            echo "Profile ${PROFILE_IDS[$i]}: Tailscale authentication failed" >&2
+        fi
+    done
+}
 
 for ((i = 0; i < PROFILE_COUNT; i++)); do
     profile_id="${PROFILE_IDS[$i]}"
@@ -337,23 +394,18 @@ for ((i = 0; i < PROFILE_COUNT; i++)); do
         sleep 1
     done
     if kill -0 "$up_pid" 2>/dev/null; then
-        kill -TERM "$up_pid" 2>/dev/null || true
-        wait "$up_pid" 2>/dev/null || true
+        PROFILE_UP_PIDS[$i]="$up_pid"
         PROFILE_STATES[$i]="pending"
-        echo "Profile $profile_id: authentication timed out; continuing with other profiles" >&2
+        echo "Profile $profile_id: authentication is still pending; continuing with other profiles" >&2
         continue
     fi
     if ! wait "$up_pid"; then
-        PROFILE_STATES[$i]="pending"
-        echo "Profile $profile_id: waiting for Tailscale authentication" >&2
+        PROFILE_STATES[$i]="error"
+        echo "Profile $profile_id: Tailscale authentication failed" >&2
         continue
     fi
 
-    ip route replace "100.64.0.0/10" dev "$ts_if" table "$table"
-    ip route replace default dev "$vpn_if" table "$table"
-    ip rule add iif "$ts_if" table "$table" pref "$((1000 + i))"
-    ip rule add fwmark "$table" table "$table" pref "$((2000 + i))"
-    PROFILE_STATES[$i]="connected"
+    activate_profile "$i"
     write_status
 done
 
@@ -377,21 +429,20 @@ if ! ip6tables -F FORWARD || ! ip6tables -P FORWARD DROP; then
     exit 1
 fi
 
+process_pending_profiles
 for ((i = 0; i < PROFILE_COUNT; i++)); do
-    [ "${PROFILE_STATES[$i]}" = connected ] || continue
-    ts_if="${TS_INTERFACES[$i]}"
-    vpn_if="${VPN_INTERFACES[$i]}"
-    mark="${PROFILE_TABLES[$i]}"
-    iptables -t mangle -A PREROUTING -i "$ts_if" -m conntrack --ctstate NEW -j CONNMARK --set-mark "$mark"
-    iptables -t mangle -A PREROUTING -j CONNMARK --restore-mark
-    iptables -t mangle -A OUTPUT -j CONNMARK --restore-mark
-    iptables -A FORWARD -i "$ts_if" -o "$vpn_if" -j ACCEPT
-    iptables -A FORWARD -i "$vpn_if" -o "$ts_if" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-    iptables -t nat -A POSTROUTING -o "$vpn_if" -j MASQUERADE
+    configure_profile_firewall "$i"
 done
 
-if ! grep -q '"connected":true' "$STATUS_FILE"; then
-    echo "No multi-exit-node profile connected" >&2
+pending_auth=false
+for ((i = 0; i < PROFILE_COUNT; i++)); do
+    if [ "${PROFILE_STATES[$i]}" = pending ] && kill -0 "${PROFILE_UP_PIDS[$i]}" 2>/dev/null; then
+        pending_auth=true
+        break
+    fi
+done
+if ! grep -q '"connected":true' "$STATUS_FILE" && [ "$pending_auth" != true ]; then
+    echo "No multi-exit-node profile connected or awaiting authentication" >&2
     exit 1
 fi
 
@@ -409,6 +460,7 @@ telemetry_writer &
 TELEMETRY_PID=$!
 
 while true; do
+    process_pending_profiles
     for ((i = 0; i < PROFILE_COUNT; i++)); do
         [ "${PROFILE_STATES[$i]}" = connected ] || [ "${PROFILE_STATES[$i]}" = degraded ] || continue
         if ! kill -0 "${TS_PIDS[$i]}" 2>/dev/null || \
@@ -431,5 +483,16 @@ while true; do
         echo "The telemetry writer stopped unexpectedly; restarting the container" >&2
         exit 1
     fi
-    sleep "$VPN_CHECK_INTERVAL"
+    pending_auth=false
+    for ((i = 0; i < PROFILE_COUNT; i++)); do
+        if [ "${PROFILE_STATES[$i]}" = pending ] && kill -0 "${PROFILE_UP_PIDS[$i]}" 2>/dev/null; then
+            pending_auth=true
+            break
+        fi
+    done
+    if [ "$pending_auth" = true ]; then
+        sleep "$STATUS_UPDATE_INTERVAL"
+    else
+        sleep "$VPN_CHECK_INTERVAL"
+    fi
 done

@@ -73,11 +73,33 @@ configure_forwarding() {
 
 configure_forwarding
 
+profile_has_vpn_config() {
+    local metadata="$1"
+    local directory
+    local mode
+    directory=$(dirname "$metadata")
+    mode=$(sed -n 's/^VPN_TYPE=//p' "$metadata" | head -n1 | tr '[:upper:]' '[:lower:]')
+    case "$mode" in
+        wireguard)
+            [ -f "$directory/wireguard.conf" ]
+            ;;
+        openvpn)
+            [ -f "$directory/openvpn.ovpn" ]
+            ;;
+        ''|auto)
+            [ -f "$directory/wireguard.conf" ] || [ -f "$directory/openvpn.ovpn" ]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
 # When the Web UI has created profiles, run the multi-exit-node supervisor.
 # Without profiles, keep the legacy single-profile mode.
 if [ "${MULTI_PROFILE_ENABLED:-1}" != "0" ]; then
     for profile_metadata in /etc/bridge-profiles/*/profile.env; do
-        if [ -f "$profile_metadata" ]; then
+        if [ -f "$profile_metadata" ] && profile_has_vpn_config "$profile_metadata"; then
             exec /multi-entrypoint.sh
         fi
     done
@@ -169,6 +191,36 @@ interface_stat() {
     fi
 }
 
+active_exit_node_clients() {
+    # Count unique Tailscale source addresses in forwarded conntrack entries.
+    if ! command -v conntrack >/dev/null 2>&1; then
+        echo 0
+        return
+    fi
+
+    conntrack -L -f ipv4 2>/dev/null | awk '
+        function is_tailscale_ip(ip, parts, second_octet) {
+            if (split(ip, parts, ".") != 4 || parts[1] != "100") return 0
+            second_octet = parts[2] + 0
+            return second_octet >= 64 && second_octet <= 127
+        }
+        {
+            for (i = 1; i <= NF; i++) {
+                if ($i ~ /^src=/) {
+                    ip = substr($i, 5)
+                    if (is_tailscale_ip(ip)) clients[ip] = 1
+                    break
+                }
+            }
+        }
+        END {
+            count = 0
+            for (ip in clients) count++
+            print count + 0
+        }
+    '
+}
+
 write_traffic() {
     local ts_rx_bytes
     local ts_tx_bytes
@@ -178,6 +230,7 @@ write_traffic() {
     local vpn_tx_bytes
     local vpn_rx_packets
     local vpn_tx_packets
+    local exit_node_clients
     ts_rx_bytes=$(interface_stat "tailscale0" "rx_bytes")
     ts_tx_bytes=$(interface_stat "tailscale0" "tx_bytes")
     ts_rx_packets=$(interface_stat "tailscale0" "rx_packets")
@@ -186,6 +239,7 @@ write_traffic() {
     vpn_tx_bytes=$(interface_stat "${VPN_INTERFACE:-}" "tx_bytes")
     vpn_rx_packets=$(interface_stat "${VPN_INTERFACE:-}" "rx_packets")
     vpn_tx_packets=$(interface_stat "${VPN_INTERFACE:-}" "tx_packets")
+    exit_node_clients=$(active_exit_node_clients)
     local traffic_tmp="${TRAFFIC_FILE}.tmp.${BASHPID:-$$}"
     cat > "$traffic_tmp" <<EOF
 {
@@ -197,6 +251,7 @@ write_traffic() {
   "vpn_tx_bytes": "${vpn_tx_bytes}",
   "vpn_rx_packets": "${vpn_rx_packets}",
   "vpn_tx_packets": "${vpn_tx_packets}",
+  "exit_node_clients": ${exit_node_clients},
   "traffic_updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF

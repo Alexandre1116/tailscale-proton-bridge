@@ -53,3 +53,19 @@ def test_compose_enables_multi_profile_mode_by_default():
     compose = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 
     assert "MULTI_PROFILE_ENABLED=${MULTI_PROFILE_ENABLED:-1}" in compose
+
+
+def test_multi_profile_dispatch_requires_a_usable_vpn_configuration():
+    entrypoint = (PROJECT_ROOT / "entrypoint.sh").read_text(encoding="utf-8")
+
+    assert "profile_has_vpn_config()" in entrypoint
+    assert 'profile_has_vpn_config "$profile_metadata"' in entrypoint
+    assert '"exit_node_clients": ${exit_node_clients}' in entrypoint
+
+
+def test_multi_profile_authentication_stays_alive_until_the_user_finishes():
+    supervisor = (PROJECT_ROOT / "multi-entrypoint.sh").read_text(encoding="utf-8")
+
+    assert 'PROFILE_UP_PIDS[$i]="$up_pid"' in supervisor
+    assert "process_pending_profiles" in supervisor
+    assert 'kill -TERM "$up_pid"' not in supervisor
