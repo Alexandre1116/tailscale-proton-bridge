@@ -28,6 +28,26 @@ if [ "${#STATUS_UPDATE_INTERVAL}" -gt 7 ] || {
     exit 1
 fi
 
+# Tailscale's own WireGuard UDP (the underlay) leaves through the local network
+# instead of the Proton tunnel. Proton's NAT changes the mapping per
+# destination, which forces every peer onto a DERP relay. Only this fixed UDP
+# source port is routed outside the tunnel; client traffic, DNS, control plane
+# and DERP still use the VPN.
+TS_PORT="${TS_PORT:-41641}"
+TS_DIRECT_UNDERLAY="${TS_DIRECT_UNDERLAY:-1}"
+UNDERLAY_TABLE="51900"
+UNDERLAY_RULE_PRIORITY="5200"
+case "$TS_PORT" in
+    ''|*[!0-9]*|0*)
+        echo "Error: TS_PORT must be an integer between 1 and 65535." >&2
+        exit 1
+        ;;
+esac
+if [ "${#TS_PORT}" -gt 5 ] || [ "$TS_PORT" -gt 65535 ]; then
+    echo "Error: TS_PORT must be an integer between 1 and 65535." >&2
+    exit 1
+fi
+
 configure_forwarding() {
     echo "Configuring IP forwarding before starting Tailscale..."
 
@@ -250,7 +270,12 @@ mkdir -p /var/lib/tailscale /var/run/tailscale
 # Se o socket antigo ainda existir devido a um crash anterior, limpá-lo
 rm -f /var/run/tailscale/tailscaled.sock
 
-tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock &
+# Guardar a rota local original antes de a VPN substituir a rota por defeito.
+UNDERLAY_ROUTE=$(ip route show default | awk '$1 == "default" && $2 == "via" {print $3, $5; exit}')
+UNDERLAY_GATEWAY=${UNDERLAY_ROUTE%% *}
+UNDERLAY_DEVICE=${UNDERLAY_ROUTE#* }
+
+tailscaled --state=/var/lib/tailscale/tailscaled.state --socket=/var/run/tailscale/tailscaled.sock --port="$TS_PORT" &
 TAILSCALED_PID=$!
 
 # Aguardar que o socket do tailscaled fique ativo
@@ -373,6 +398,23 @@ if ! ip addr show dev "$VPN_INTERFACE" 2>/dev/null | grep -q "inet "; then
     exit 1
 fi
 echo "Conexão VPN estabelecida com sucesso na interface $VPN_INTERFACE!"
+
+configure_tailscale_underlay() {
+    if [ "$TS_DIRECT_UNDERLAY" != "1" ]; then
+        echo "TS_DIRECT_UNDERLAY desativado: o Tailscale comunica com os peers através da VPN."
+        return 0
+    fi
+    if [ -z "$UNDERLAY_GATEWAY" ] || [ -z "$UNDERLAY_DEVICE" ]; then
+        echo "Aviso: rota local original desconhecida; o Tailscale vai usar relays DERP." >&2
+        return 0
+    fi
+    echo "A encaminhar o UDP do Tailscale (porta $TS_PORT) pela rede local para ligações diretas..."
+    ip route replace default via "$UNDERLAY_GATEWAY" dev "$UNDERLAY_DEVICE" table "$UNDERLAY_TABLE"
+    while ip rule del priority "$UNDERLAY_RULE_PRIORITY" 2>/dev/null; do :; done
+    ip rule add priority "$UNDERLAY_RULE_PRIORITY" ipproto udp sport "$TS_PORT" lookup "$UNDERLAY_TABLE"
+}
+
+configure_tailscale_underlay
 
 # 4. Configurar Regras do Firewall (iptables NAT). O forwarding foi ativado
 # antes do tailscaled para que o Tailscale veja o estado correto desde o arranque.

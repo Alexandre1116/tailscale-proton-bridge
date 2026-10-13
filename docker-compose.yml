@@ -14,6 +14,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+      # Docker-in-LXC (e.g. Proxmox) may need BRIDGE_APPARMOR_PROFILE=unconfined.
+      - apparmor=${BRIDGE_APPARMOR_PROFILE:-docker-default}
     devices:
       - /dev/net/tun:/dev/net/tun
     sysctls:
@@ -57,6 +59,10 @@ services:
       - STATUS_UPDATE_INTERVAL=${STATUS_UPDATE_INTERVAL:-2}
       # Argumentos adicionais opcionais para o comando 'tailscale up'
       - TS_EXTRA_ARGS=${TS_EXTRA_ARGS:-}
+      # Porta UDP fixa do tailscaled. Com TS_DIRECT_UNDERLAY=1 apenas esta porta
+      # sai pela rede local, permitindo ligações diretas em vez de relays DERP.
+      - TS_PORT=${TS_PORT:-41641}
+      - TS_DIRECT_UNDERLAY=${TS_DIRECT_UNDERLAY:-1}
 
     healthcheck:
       test: ["CMD", "/healthcheck.sh"]

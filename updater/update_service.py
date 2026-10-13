@@ -186,6 +186,15 @@ def install_release(state, requested_tag=None):
     if requested_tag and latest and requested_tag != latest:
         raise RuntimeError("The requested release is no longer the latest release")
 
+    # Compose runs against the host Docker daemon, so bind mounts and build
+    # contexts only resolve when the workspace path is the real host path.
+    host_path = read_dotenv().get("UPDATE_HOST_PROJECT_PATH", "")
+    if not host_path or host_path != WORKSPACE:
+        raise RuntimeError(
+            "Update blocked: set UPDATE_HOST_PROJECT_PATH in .env to the absolute "
+            "project path on the Docker host, then recreate the updater"
+        )
+
     state["status"] = "installing"
     state["error"] = None
     write_state(state)
