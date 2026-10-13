@@ -69,7 +69,7 @@ def test_multi_profile_authentication_stays_alive_until_the_user_finishes():
     assert 'PROFILE_UP_PIDS[$i]="$up_pid"' in supervisor
     assert "process_pending_profiles" in supervisor
     assert "has_active_profile" in supervisor
-    assert supervisor.index("process_pending_profiles\nfor ((i") < supervisor.index("write_status\n\npending_auth")
+    assert 'if [ "${PROFILE_STATES[$i]}" = pending ] && [ -n "${PROFILE_UP_PIDS[$i]:-}" ]; then' in supervisor
     assert 'kill -TERM "$up_pid"' not in supervisor
 
 

@@ -295,7 +295,7 @@ has_active_profile() {
         if [ "${PROFILE_STATES[$i]}" = connected ] || [ "${PROFILE_STATES[$i]}" = degraded ]; then
             return 0
         fi
-        if [ "${PROFILE_STATES[$i]}" = pending ] && kill -0 "${PROFILE_UP_PIDS[$i]:-}" 2>/dev/null; then
+        if [ "${PROFILE_STATES[$i]}" = pending ] && [ -n "${PROFILE_UP_PIDS[$i]:-}" ]; then
             return 0
         fi
     done
@@ -448,14 +448,7 @@ for ((i = 0; i < PROFILE_COUNT; i++)); do
 done
 write_status
 
-pending_auth=false
-for ((i = 0; i < PROFILE_COUNT; i++)); do
-    if [ "${PROFILE_STATES[$i]}" = pending ] && kill -0 "${PROFILE_UP_PIDS[$i]}" 2>/dev/null; then
-        pending_auth=true
-        break
-    fi
-done
-if ! grep -q '"connected":true' "$STATUS_FILE" && [ "$pending_auth" != true ]; then
+if ! has_active_profile; then
     echo "No multi-exit-node profile connected or awaiting authentication" >&2
     exit 1
 fi
@@ -503,7 +496,7 @@ while true; do
     fi
     pending_auth=false
     for ((i = 0; i < PROFILE_COUNT; i++)); do
-        if [ "${PROFILE_STATES[$i]}" = pending ] && kill -0 "${PROFILE_UP_PIDS[$i]}" 2>/dev/null; then
+        if [ "${PROFILE_STATES[$i]}" = pending ] && [ -n "${PROFILE_UP_PIDS[$i]:-}" ]; then
             pending_auth=true
             break
         fi
