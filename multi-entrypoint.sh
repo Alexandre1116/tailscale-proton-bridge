@@ -19,6 +19,7 @@ declare -a PROFILE_IDS PROFILE_NAMES PROFILE_TYPES PROFILE_HOSTNAMES PROFILE_EXT
 declare -a VPN_INTERFACES TS_INTERFACES TS_SOCKETS TS_PIDS VPN_PIDS
 declare -a PROFILE_STATES PROFILE_AUTH_URLS PROFILE_FAILURES PROFILE_TABLES
 PROFILE_COUNT=0
+TELEMETRY_PID=""
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -169,6 +170,7 @@ profile_mode() {
 cleanup() {
     local i
     trap - TERM INT EXIT
+    [ -n "$TELEMETRY_PID" ] && kill -TERM "$TELEMETRY_PID" 2>/dev/null || true
     for ((i = 0; i < PROFILE_COUNT; i++)); do
         [ -n "${TS_PIDS[$i]:-}" ] && kill -TERM "${TS_PIDS[$i]}" 2>/dev/null || true
         [ -n "${VPN_PIDS[$i]:-}" ] && kill -TERM "${VPN_PIDS[$i]}" 2>/dev/null || true
@@ -248,6 +250,12 @@ for ((i = 0; i < PROFILE_COUNT; i++)); do
             -e 's/^([[:space:]]*DNS[[:space:]]*=)/# \1/gI' \
             -e '/^[[:space:]]*Table[[:space:]]*=/d' "$source" | \
             sed '/^\[Interface\]$/a Table = off' > "$running"
+        if ! ip link add dev wg-test-link type wireguard >/dev/null 2>&1; then
+            echo "Kernel WireGuard module not detected. Using wireguard-go for $profile_id."
+            export WG_QUICK_USERSPACE_IMPLEMENTATION=wireguard-go
+        else
+            ip link delete wg-test-link
+        fi
         if ! wg-quick up "$running" >/tmp/bridge-"${profile_id}".log 2>&1; then
             PROFILE_STATES[$i]="error"
             echo "Profile $profile_id: WireGuard failed to start" >&2
@@ -273,8 +281,9 @@ for ((i = 0; i < PROFILE_COUNT; i++)); do
         chmod 600 "$credentials"
         sed -E \
             -e '/^[[:space:]]*dev([[:space:]]|$)/d' \
+            -e '/^[[:space:]]*dev-type([[:space:]]|$)/d' \
             -e '/^[[:space:]]*route(-ipv6)?([[:space:]]|$)/d' "$source" > "$running"
-        printf '\nroute-nopull\ndev %s\n' "$vpn_if" >> "$running"
+        printf '\nroute-nopull\ndev-type tun\ndev %s\n' "$vpn_if" >> "$running"
         openvpn --config "$running" --auth-user-pass "$credentials" --auth-nocache \
             >/tmp/bridge-"${profile_id}".log 2>&1 &
         VPN_PIDS[$i]=$!
@@ -327,6 +336,13 @@ for ((i = 0; i < PROFILE_COUNT; i++)); do
         wait_count=$((wait_count + 1))
         sleep 1
     done
+    if kill -0 "$up_pid" 2>/dev/null; then
+        kill -TERM "$up_pid" 2>/dev/null || true
+        wait "$up_pid" 2>/dev/null || true
+        PROFILE_STATES[$i]="pending"
+        echo "Profile $profile_id: authentication timed out; continuing with other profiles" >&2
+        continue
+    fi
     if ! wait "$up_pid"; then
         PROFILE_STATES[$i]="pending"
         echo "Profile $profile_id: waiting for Tailscale authentication" >&2
@@ -346,11 +362,20 @@ if ! sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1; then
 fi
 sysctl -w net.ipv6.conf.all.disable_ipv6=1 >/dev/null 2>&1 || true
 sysctl -w net.ipv6.conf.default.disable_ipv6=1 >/dev/null 2>&1 || true
+if [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo 0)" != "1" ] || \
+   [ "$(sysctl -n net.ipv6.conf.default.disable_ipv6 2>/dev/null || echo 0)" != "1" ]; then
+    echo "IPv6 could not be disabled; refusing to start the multi-profile dataplane" >&2
+    exit 1
+fi
 iptables -F FORWARD || true
 iptables -P FORWARD DROP
 iptables -t nat -F POSTROUTING || true
 iptables -t mangle -F PREROUTING || true
 iptables -t mangle -F OUTPUT || true
+if ! ip6tables -F FORWARD || ! ip6tables -P FORWARD DROP; then
+    echo "Could not install the IPv6 forwarding kill switch" >&2
+    exit 1
+fi
 
 for ((i = 0; i < PROFILE_COUNT; i++)); do
     [ "${PROFILE_STATES[$i]}" = connected ] || continue
@@ -372,9 +397,20 @@ fi
 
 write_status
 write_traffic
+
+telemetry_writer() {
+    while true; do
+        write_traffic
+        sleep "$STATUS_UPDATE_INTERVAL"
+    done
+}
+
+telemetry_writer &
+TELEMETRY_PID=$!
+
 while true; do
     for ((i = 0; i < PROFILE_COUNT; i++)); do
-        [ "${PROFILE_STATES[$i]}" = connected ] || continue
+        [ "${PROFILE_STATES[$i]}" = connected ] || [ "${PROFILE_STATES[$i]}" = degraded ] || continue
         if ! kill -0 "${TS_PIDS[$i]}" 2>/dev/null || \
            { [ "${PROFILE_TYPES[$i]}" = openvpn ] && ! kill -0 "${VPN_PIDS[$i]}" 2>/dev/null; } || \
            ! ip addr show dev "${VPN_INTERFACES[$i]}" 2>/dev/null | grep -q 'inet ' || \
@@ -382,7 +418,8 @@ while true; do
             PROFILE_FAILURES[$i]=$((PROFILE_FAILURES[$i] + 1))
             PROFILE_STATES[$i]="degraded"
             if [ "${PROFILE_FAILURES[$i]}" -ge "$VPN_FAILURE_THRESHOLD" ]; then
-                echo "Profile ${PROFILE_IDS[$i]} failed its health checks" >&2
+                echo "Profile ${PROFILE_IDS[$i]} failed its health checks; restarting the container" >&2
+                exit 1
             fi
         else
             PROFILE_FAILURES[$i]=0
@@ -390,6 +427,9 @@ while true; do
         fi
     done
     write_status
-    write_traffic
+    if ! kill -0 "$TELEMETRY_PID" 2>/dev/null; then
+        echo "The telemetry writer stopped unexpectedly; restarting the container" >&2
+        exit 1
+    fi
     sleep "$VPN_CHECK_INTERVAL"
 done
