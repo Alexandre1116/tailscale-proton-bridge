@@ -44,6 +44,13 @@ def test_assets_are_not_served_from_a_stale_browser_cache(client, monkeypatch):
     assert client.get("/api/updates", headers=auth_header()).headers["Cache-Control"] == "no-cache"
 
 
+def test_hidden_attribute_beats_class_display_rules(client):
+    # .update-banner sets display: flex, which would keep a hidden banner visible.
+    css = client.get("/static/style.css").get_data(as_text=True)
+
+    assert "[hidden] { display: none !important; }" in css
+
+
 def test_invalid_credentials_are_rejected(client):
     response = client.get("/api/status", headers=auth_header(password="wrong"))
     assert response.status_code == 401
