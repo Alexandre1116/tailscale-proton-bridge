@@ -18,6 +18,9 @@
 }
 
 * { box-sizing: border-box; }
+/* Class rules such as .update-banner { display: flex } would otherwise
+   override the hidden attribute and keep hidden elements visible. */
+[hidden] { display: none !important; }
 html, body { margin: 0; padding: 0; }
 body { min-height: 100vh; background: var(--canvas); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.5; }
 a { color: var(--orange-dark); }
