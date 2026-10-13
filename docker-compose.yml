@@ -140,7 +140,12 @@ services:
       - ${UPDATE_HOST_PROJECT_PATH:-.}:${UPDATE_HOST_PROJECT_PATH:-/workspace}
       - ./updater/state:/state
       - /var/run/docker.sock:/var/run/docker.sock
+    # The root filesystem is read-only, but Docker Compose/buildx must write
+    # their client config; keep it on a tmpfs.
+    tmpfs:
+      - /tmp
     environment:
+      - DOCKER_CONFIG=/tmp/.docker
       - UPDATE_WORKSPACE=${UPDATE_HOST_PROJECT_PATH:-/workspace}
       - UPDATE_STATE_PATH=/state/state.json
       - UPDATE_REQUEST_PATH=/state/request.json
