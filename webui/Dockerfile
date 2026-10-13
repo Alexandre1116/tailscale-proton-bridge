@@ -15,7 +15,8 @@ RUN chmod 0755 entrypoint.sh healthcheck.sh
 
 # The UI only writes the explicitly mounted configuration directories.
 # The runtime user is still configurable by the image/runtime environment.
-RUN addgroup -S webui && adduser -S -G webui webui \
+# Fixed IDs: the updater shares its state directory with 100:101.
+RUN addgroup -S -g 101 webui && adduser -S -u 100 -G webui webui \
     && mkdir -p /data \
     && chown -R webui:webui /app /data
 USER webui

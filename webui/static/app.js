@@ -344,7 +344,8 @@
 
     function render(data) {
       currentTag = data.latest_version || null;
-      var available = !!data.update_available;
+      // Never offer an install without a known release tag (stale or unreadable state).
+      var available = !!data.update_available && !!data.latest_version && data.status !== "error";
       var busy = data.status === "checking" || data.status === "installing" || data.status === "queued";
       var status = data.status === "update_available" ? "Update available" :
         data.status === "up_to_date" ? "Up to date" :
@@ -362,7 +363,7 @@
         badge.className = "update-status-badge " + (available ? "available" : (data.status === "error" ? "error" : ""));
       }
       var message = document.getElementById("update-message");
-      if (message) message.textContent = data.error || (available ? "A new release is ready to install." : status === "up_to_date" ? "No update detected." : "The updater is " + status.toLowerCase() + ".");
+      if (message) message.textContent = data.error || (available ? "A new release is ready to install." : data.status === "up_to_date" ? "No update detected." : "The updater is " + status.toLowerCase() + ".");
       var install = document.getElementById("install-update");
       if (install) {
         install.disabled = !available || busy;
@@ -395,16 +396,23 @@
       body.set("csrf_token", source.dataset.csrfToken || "");
       if (extra) Object.keys(extra).forEach(function (key) { body.set(key, extra[key]); });
       fetch(url, { method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: body.toString() })
-        .then(function (res) { if (!res.ok) throw new Error("update request failed"); })
+        .then(function (res) {
+          if (res.ok) return;
+          return res.json().catch(function () { return {}; }).then(function (data) {
+            var error = new Error("update request failed");
+            error.updaterMessage = data.error;
+            throw error;
+          });
+        })
         .then(refresh)
         .then(function () {
           window.setTimeout(refresh, 1000);
           window.setTimeout(refresh, 3000);
           window.setTimeout(refresh, 6000);
         })
-        .catch(function () {
+        .catch(function (error) {
           var message = document.getElementById("update-message");
-          if (message) message.textContent = "Could not contact the updater.";
+          if (message) message.textContent = (error && error.updaterMessage) || "Could not contact the updater.";
         })
         .then(function () { requestInFlight = false; });
     }
