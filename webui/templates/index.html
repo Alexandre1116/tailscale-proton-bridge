@@ -74,12 +74,12 @@
 
   <form class="profile-card profile-new" method="post" action="{{ url_for('save_profile') }}" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="profile_vpn_type" value="wireguard">
     <h3>Add profile</h3>
     <div class="profile-fields">
       <div><label>Profile id <span class="hint">lowercase, numbers, hyphens</span></label><input type="text" name="profile_id" pattern="[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?" required></div>
       <div><label>Display name</label><input type="text" name="profile_name" placeholder="Portugal" required></div>
       <div><label>Tailscale hostname</label><input type="text" name="profile_hostname" placeholder="protonvpn-portugal" required></div>
+      <div><label>VPN protocol</label><select name="profile_vpn_type"><option value="auto">Automatic</option><option value="wireguard">WireGuard</option><option value="openvpn">OpenVPN</option></select></div>
       <div><label>Extra Tailscale arguments</label><input type="text" name="profile_ts_extra_args"></div>
     </div>
     <div class="profile-uploads">
