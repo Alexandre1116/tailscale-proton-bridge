@@ -1,4 +1,5 @@
 import base64
+import io
 import ipaddress
 import json
 import os
@@ -81,7 +82,7 @@ def test_status_keeps_health_state_when_live_traffic_updates_separately(client, 
     traffic_path = tmp_path / "traffic.json"
     status_path.write_text(json.dumps({"connected": True, "last_updated": "health-time"}), encoding="utf-8")
     traffic_path.write_text(
-        json.dumps({"vpn_tx_bytes": 1234, "traffic_updated": "traffic-time"}),
+        json.dumps({"vpn_tx_bytes": 1234, "exit_node_clients": 3, "traffic_updated": "traffic-time"}),
         encoding="utf-8",
     )
     monkeypatch.setattr(webapp, "STATUS_FILE", str(status_path))
@@ -93,6 +94,7 @@ def test_status_keeps_health_state_when_live_traffic_updates_separately(client, 
     data = response.get_json()
     assert data["connected"] is True
     assert data["vpn_tx_bytes"] == "1234"
+    assert data["exit_node_clients"] == 3
     assert data["traffic_updated"] == "traffic-time"
 
 
@@ -250,3 +252,73 @@ def test_update_install_rejects_invalid_tag(client, tmp_path, monkeypatch):
     )
 
     assert response.status_code == 400
+
+
+def test_save_profile_writes_metadata_configs_and_private_secrets(client, tmp_path, monkeypatch):
+    profiles_dir = tmp_path / "profiles"
+    monkeypatch.setattr(webapp, "PROFILES_DIR", str(profiles_dir))
+    with client.session_transaction() as session:
+        session["csrf"] = "known-token"
+
+    response = client.post(
+        "/profile/save",
+        headers=auth_header(),
+        data={
+            "csrf_token": "known-token",
+            "profile_id": "pt-lisbon",
+            "profile_name": "Portugal",
+            "profile_vpn_type": "wireguard",
+            "profile_hostname": "protonvpn-portugal",
+            "profile_ts_extra_args": "",
+            "profile_ts_authkey": "tskey-auth-example",
+            "profile_protonvpn_user": "",
+            "profile_protonvpn_password": "",
+            "profile_wg_conf": (io.BytesIO(b"[Interface]\nPrivateKey = secret\n"), "portugal.conf"),
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 302
+    profile_dir = profiles_dir / "pt-lisbon"
+    assert (profile_dir / "profile.env").read_text(encoding="utf-8") == (
+        "ID=pt-lisbon\nNAME=Portugal\nVPN_TYPE=wireguard\n"
+        "TS_HOSTNAME=protonvpn-portugal\nTS_EXTRA_ARGS=\n"
+    )
+    assert (profile_dir / "wireguard.conf").read_bytes() == b"[Interface]\nPrivateKey = secret\n"
+    assert (profile_dir / "ts_authkey").read_text(encoding="utf-8") == "tskey-auth-example\n"
+
+
+def test_list_profiles_hides_secret_contents(client, tmp_path, monkeypatch):
+    profiles_dir = tmp_path / "profiles" / "pt"
+    profiles_dir.mkdir(parents=True)
+    (profiles_dir / "profile.env").write_text(
+        "ID=pt\nNAME=Portugal\nVPN_TYPE=wireguard\nTS_HOSTNAME=protonvpn-pt\n",
+        encoding="utf-8",
+    )
+    (profiles_dir / "ts_authkey").write_text("secret-key", encoding="utf-8")
+    monkeypatch.setattr(webapp, "PROFILES_DIR", str(profiles_dir.parent))
+    monkeypatch.setattr(webapp, "STATUS_FILE", str(tmp_path / "missing-status.json"))
+
+    profiles = webapp.list_profiles()
+
+    assert profiles[0]["name"] == "Portugal"
+    assert profiles[0]["ts_authkey_set"] is True
+    assert "secret-key" not in json.dumps(profiles)
+
+
+def test_index_renders_multi_profile_status(client, tmp_path, monkeypatch):
+    profiles_dir = tmp_path / "profiles" / "pt"
+    profiles_dir.mkdir(parents=True)
+    (profiles_dir / "profile.env").write_text(
+        "ID=pt\nNAME=Portugal\nVPN_TYPE=wireguard\nTS_HOSTNAME=protonvpn-pt\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webapp, "PROFILES_DIR", str(profiles_dir.parent))
+    monkeypatch.setattr(webapp, "STATUS_FILE", str(tmp_path / "missing-status.json"))
+
+    response = client.get("/?skip_wizard=1", headers=auth_header())
+
+    assert response.status_code == 200
+    assert b"Portugal" in response.data
+    assert b"Exit node status" in response.data
+    assert b"Devices using this exit node" in response.data

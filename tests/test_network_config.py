@@ -47,3 +47,35 @@ def test_compose_exposes_both_forwarding_sysctls():
     assert "net.ipv4.ip_forward=1" in compose
     assert "net.ipv6.conf.all.forwarding=1" in compose
     assert "net.ipv6.conf.default.forwarding=1" in compose
+
+
+def test_compose_enables_multi_profile_mode_by_default():
+    compose = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "MULTI_PROFILE_ENABLED=${MULTI_PROFILE_ENABLED:-1}" in compose
+
+
+def test_multi_profile_dispatch_requires_a_usable_vpn_configuration():
+    entrypoint = (PROJECT_ROOT / "entrypoint.sh").read_text(encoding="utf-8")
+
+    assert "profile_has_vpn_config()" in entrypoint
+    assert 'profile_has_vpn_config "$profile_metadata"' in entrypoint
+    assert '"exit_node_clients": ${exit_node_clients}' in entrypoint
+
+
+def test_multi_profile_authentication_stays_alive_until_the_user_finishes():
+    supervisor = (PROJECT_ROOT / "multi-entrypoint.sh").read_text(encoding="utf-8")
+
+    assert 'PROFILE_UP_PIDS[$i]="$up_pid"' in supervisor
+    assert "process_pending_profiles" in supervisor
+    assert "has_active_profile" in supervisor
+    assert 'if [ "${PROFILE_STATES[$i]}" = pending ] && [ -n "${PROFILE_UP_PIDS[$i]:-}" ]; then' in supervisor
+    assert 'kill -TERM "$up_pid"' not in supervisor
+
+
+def test_multi_profile_kill_switch_precedes_exit_node_advertisement():
+    supervisor = (PROJECT_ROOT / "multi-entrypoint.sh").read_text(encoding="utf-8")
+    advertise_exit_node = 'tailscale --socket="${TS_SOCKETS[$i]}" up --authkey='
+
+    assert supervisor.index("iptables -P FORWARD DROP") < supervisor.index(advertise_exit_node)
+    assert supervisor.index("ip6tables -P FORWARD DROP") < supervisor.index(advertise_exit_node)

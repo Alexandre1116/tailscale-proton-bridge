@@ -118,6 +118,14 @@
       </div>
     </div>
 
+    <div class="exit-node-usage" aria-live="polite">
+      <div>
+        <span>Devices using this exit node</span>
+        <strong id="exit-node-client-count">--</strong>
+      </div>
+      <small id="exit-node-client-detail">Waiting for bridge telemetry</small>
+    </div>
+
     <div class="status-line">
       <span id="status-detail-text">Checking status&hellip;</span>
       <span id="traffic-sample">Sampling every {{ status_update_interval }} s</span>
@@ -130,6 +138,26 @@
     <p>This device needs approval in your Tailscale account before it can connect.</p>
     <a class="btn" id="action-strip-link" href="#" target="_blank" rel="noopener">Open authentication link</a>
   </div>
+
+  {% if profiles %}
+  <section class="panel profile-runtime-panel" id="profile-runtime-panel">
+    <div class="panel-heading">
+      <div>
+        <span class="eyebrow">Tailnet devices</span>
+        <h2>Exit node status</h2>
+      </div>
+    </div>
+    <div id="profile-runtime-list" class="profile-runtime-list">
+      {% for profile in profiles %}
+      <div class="runtime-row" data-profile-id="{{ profile.id }}">
+        <span><strong>{{ profile.name }}</strong><small>{{ profile.ts_hostname }}</small></span>
+        <span class="runtime-state">{{ profile.status.state or 'Waiting' }}</span>
+        <span class="runtime-ip">{{ profile.status.tailscale_ip or 'not connected' }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
 
   <div class="update-banner" id="update-banner" data-update-url="{{ url_for('api_updates') }}" data-check-url="{{ url_for('api_updates_check') }}" data-install-url="{{ url_for('api_updates_install') }}" data-csrf-token="{{ csrf_token if csrf_token is defined else '' }}" hidden>
     <span class="dot" aria-hidden="true"></span>

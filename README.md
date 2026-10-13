@@ -162,6 +162,21 @@ port, for example `http://<host-ip>:8080`:
    ```bash
    docker compose up -d --build vpn-tailscale-bridge webui
    ```
+
+### Multiple exit nodes and locations
+
+The Web UI can create multiple Proton VPN profiles in the same bridge. Each profile has its own VPN file, Tailscale identity, hostname, VPN interface, and routing table. After restarting the bridge, the profiles appear in Tailscale as separate exit nodes. Users select the desired location in their Tailscale client.
+
+Use **Add profile**, upload the Proton WireGuard or OpenVPN file, and provide a reusable Tailscale auth key. Apply the change with:
+
+```bash
+docker compose up -d --build vpn-tailscale-bridge webui
+```
+
+Profiles are stored under `./vpn/profiles/<id>/`. Each profile is a separate Tailscale device and counts toward the tailnet device limit. Multi-profile mode is enabled by default. Set `MULTI_PROFILE_ENABLED=0` to keep using the legacy single-profile configuration.
+
+When at least one valid profile exists, the legacy files under `./vpn/wireguard`, `./vpn/openvpn`, and the legacy VPN values in `.env` are ignored by the bridge.
+The dashboard also shows the number of devices with active forwarded sessions through the exit node. This count comes from the bridge's connection tracking table, so it represents devices observed recently by the data plane, not every device that has selected the exit node while idle.
 5. **Updates**: The dashboard reads the latest stable GitHub release, shows an alert when one is available, and offers one-click installation. Enable automatic updates and choose a local host time for the daily check. The updater installs the release and rebuilds the application services.
 
 ### Updater setup

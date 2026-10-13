@@ -2,9 +2,103 @@
 {% block title %}Configuration &mdash; Tailscale &harr; Proton VPN{% endblock %}
 {% block content %}
 
+<div class="panel profiles-panel">
+  <h2>Exit node profiles</h2>
+  <p class="lede">Each profile becomes a separate Tailscale exit node. Save the profile, then restart the bridge.</p>
+
+  {% for profile in profiles %}
+  <form class="profile-card" method="post" action="{{ url_for('save_profile') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="profile_id" value="{{ profile.id }}">
+    <div class="profile-heading">
+      <div>
+        <h3>{{ profile.name }}</h3>
+        <span class="profile-id">{{ profile.id }}</span>
+      </div>
+      <span class="profile-state {{ 'state-ok' if profile.status.connected else 'state-off' }}">
+        {{ 'Connected' if profile.status.connected else (profile.status.state or 'Not running') }}
+      </span>
+    </div>
+
+    <div class="profile-fields">
+      <div>
+        <label>Display name</label>
+        <input type="text" name="profile_name" value="{{ profile.name }}" required>
+      </div>
+      <div>
+        <label>VPN protocol</label>
+        <select name="profile_vpn_type">
+          <option value="auto" {% if profile.vpn_type == 'auto' %}selected{% endif %}>Automatic</option>
+          <option value="wireguard" {% if profile.vpn_type == 'wireguard' %}selected{% endif %}>WireGuard</option>
+          <option value="openvpn" {% if profile.vpn_type == 'openvpn' %}selected{% endif %}>OpenVPN</option>
+        </select>
+      </div>
+      <div>
+        <label>Tailscale hostname</label>
+        <input type="text" name="profile_hostname" value="{{ profile.ts_hostname }}" required>
+      </div>
+      <div>
+        <label>Extra Tailscale arguments</label>
+        <input type="text" name="profile_ts_extra_args" value="{{ profile.ts_extra_args }}">
+      </div>
+    </div>
+
+    <div class="profile-uploads">
+      <label>WireGuard config <span class="hint">{{ 'uploaded' if profile.wireguard else 'missing' }}</span></label>
+      <input type="file" name="profile_wg_conf" accept=".conf">
+      <label>OpenVPN config <span class="hint">{{ 'uploaded' if profile.openvpn else 'missing' }}</span></label>
+      <input type="file" name="profile_ovpn_conf" accept=".ovpn">
+      <label>OpenVPN credentials <span class="hint">{{ 'uploaded' if profile.credentials else 'optional' }}</span></label>
+      <input type="file" name="profile_ovpn_creds" accept=".txt">
+    </div>
+
+    <div class="profile-secrets">
+      <label>Tailscale auth key <span class="hint">{{ '(set. Leave blank to keep it)' if profile.ts_authkey_set else '(recommended for automatic startup)' }}</span></label>
+      <input type="password" name="profile_ts_authkey" autocomplete="new-password">
+      <label>Proton OpenVPN username <span class="hint">{{ '(set. Leave blank to keep it)' if profile.protonvpn_user_set else '' }}</span></label>
+      <input type="text" name="profile_protonvpn_user" autocomplete="off">
+      <label>Proton OpenVPN password <span class="hint">{{ '(set. Leave blank to keep it)' if profile.protonvpn_password_set else '' }}</span></label>
+      <input type="password" name="profile_protonvpn_password" autocomplete="new-password">
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="btn">Save profile</button>
+    </div>
+  </form>
+  <form class="profile-delete" method="post" action="{{ url_for('delete_profile') }}" data-confirm="Remove this profile and its VPN credentials?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="profile_id" value="{{ profile.id }}">
+    <button type="submit" class="btn ghost">Remove {{ profile.id }}</button>
+  </form>
+  {% endfor %}
+
+  <form class="profile-card profile-new" method="post" action="{{ url_for('save_profile') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>Add profile</h3>
+    <div class="profile-fields">
+      <div><label>Profile id <span class="hint">lowercase, numbers, hyphens</span></label><input type="text" name="profile_id" pattern="[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?" required></div>
+      <div><label>Display name</label><input type="text" name="profile_name" placeholder="Portugal" required></div>
+      <div><label>Tailscale hostname</label><input type="text" name="profile_hostname" placeholder="protonvpn-portugal" required></div>
+      <div><label>VPN protocol</label><select name="profile_vpn_type"><option value="auto">Automatic</option><option value="wireguard">WireGuard</option><option value="openvpn">OpenVPN</option></select></div>
+      <div><label>Extra Tailscale arguments</label><input type="text" name="profile_ts_extra_args"></div>
+    </div>
+    <div class="profile-uploads">
+      <label>WireGuard config</label><input type="file" name="profile_wg_conf" accept=".conf">
+      <label>OpenVPN config</label><input type="file" name="profile_ovpn_conf" accept=".ovpn">
+      <label>OpenVPN credentials</label><input type="file" name="profile_ovpn_creds" accept=".txt">
+    </div>
+    <div class="profile-secrets">
+      <label>Tailscale auth key</label><input type="password" name="profile_ts_authkey" autocomplete="new-password">
+      <label>Proton OpenVPN username</label><input type="text" name="profile_protonvpn_user" autocomplete="off">
+      <label>Proton OpenVPN password</label><input type="password" name="profile_protonvpn_password" autocomplete="new-password">
+    </div>
+    <div class="actions"><button type="submit" class="btn">Add profile</button></div>
+  </form>
+</div>
+
 <div class="panel config-panel">
   <h2>Configuration</h2>
-  <p class="lede">Changes made here update files on disk. Restart both containers after saving to apply them.</p>
+  <p class="lede">Changes made here update the legacy single-profile configuration. When profiles exist above, this section is ignored. Restart both containers after saving to apply changes.</p>
 
   <form id="configuration-form" method="post" action="{{ url_for('save') }}" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

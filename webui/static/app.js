@@ -33,6 +33,17 @@
     return new Intl.NumberFormat().format(value) + " packets";
   }
 
+  function formatClientCount(value) {
+    var count = Number(value);
+    if (!Number.isSafeInteger(count) || count < 0) return "--";
+    return new Intl.NumberFormat().format(count);
+  }
+
+  function resetClientCount(connected) {
+    setText("exit-node-client-count", connected ? "--" : "0");
+    setText("exit-node-client-detail", connected ? "Waiting for bridge telemetry" : "No active exit-node sessions");
+  }
+
   function resetTraffic() {
     ["tailnet-rx-rate", "vpn-tx-rate", "vpn-rx-rate", "tailnet-tx-rate"].forEach(function (id) {
       setText(id, "--");
@@ -146,6 +157,14 @@
     setText("status-detail-text",
       data.last_updated ? ("Last checked: " + data.last_updated) : "No status data yet.");
 
+    var hasClientCount = data.exit_node_clients !== null && data.exit_node_clients !== undefined;
+    if (connected && hasClientCount && Number.isSafeInteger(Number(data.exit_node_clients)) && Number(data.exit_node_clients) >= 0) {
+      setText("exit-node-client-count", formatClientCount(data.exit_node_clients));
+      setText("exit-node-client-detail", "Active sessions observed by the bridge");
+    } else {
+      resetClientCount(connected);
+    }
+
     var strip = document.getElementById("action-strip");
     var link = document.getElementById("action-strip-link");
     if (strip && link) {
@@ -157,6 +176,25 @@
       }
     }
     if (panel) updateTraffic(data, panel);
+    applyProfileStatus(data);
+  }
+
+  function applyProfileStatus(data) {
+    var rows = document.querySelectorAll("[data-profile-id]");
+    if (!rows.length || !Array.isArray(data.profiles)) return;
+    var byId = {};
+    data.profiles.forEach(function (profile) { byId[profile.id] = profile; });
+    rows.forEach(function (row) {
+      var profile = byId[row.dataset.profileId];
+      if (!profile) return;
+      var state = row.querySelector(".runtime-state");
+      var ip = row.querySelector(".runtime-ip");
+      if (state) {
+        state.textContent = profile.connected ? "Connected" : (profile.state || "Waiting");
+        state.className = "runtime-state " + (profile.connected ? "state-ok" : "state-off");
+      }
+      if (ip) ip.textContent = profile.tailscale_ip || "not connected";
+    });
   }
 
   function refreshStatus() {
@@ -184,6 +222,7 @@
         setText("node-ip", "not connected");
         setText("node-ip-mobile", "not connected");
         setText("status-detail-text", "Unable to read bridge status.");
+        resetClientCount(true);
         setText("connection-announcement", "Connection status: unavailable");
         lastAnnouncedConnection = "Unavailable";
         resetTraffic();
@@ -258,6 +297,14 @@
           input.files = e.dataTransfer.files;
           announce();
         }
+      });
+    });
+  }
+
+  function initConfirmations() {
+    document.querySelectorAll("[data-confirm]").forEach(function (form) {
+      form.addEventListener("submit", function (event) {
+        if (!window.confirm(form.dataset.confirm)) event.preventDefault();
       });
     });
   }
@@ -428,9 +475,10 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
-    initStatusPolling();
-    initVpnTypeToggle();
-    initDropzones();
+  initStatusPolling();
+  initVpnTypeToggle();
+  initDropzones();
+  initConfirmations();
     initMethodCards();
     initWizard();
     initUpdater();

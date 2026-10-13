@@ -11,6 +11,7 @@ import os
 import re
 import secrets
 import ipaddress
+import shutil
 import tempfile
 from datetime import datetime, timezone
 from functools import wraps
@@ -25,6 +26,7 @@ ENV_PATH = os.environ.get("ENV_PATH", "/data/.env")
 VPN_DIR = os.environ.get("VPN_DIR", "/data/vpn")
 WG_DIR = os.path.join(VPN_DIR, "wireguard")
 OVPN_DIR = os.path.join(VPN_DIR, "openvpn")
+PROFILES_DIR = os.path.join(VPN_DIR, "profiles")
 STATUS_FILE = os.environ.get("STATUS_FILE", "/var/run/bridge-status/status.json")
 TRAFFIC_FILE = os.environ.get("TRAFFIC_FILE", "/var/run/bridge-status/traffic.json")
 UPDATE_STATE_PATH = os.environ.get("UPDATE_STATE_PATH", "/data/update-state/state.json")
@@ -116,6 +118,8 @@ ENV_FIELDS = [
 ]
 
 HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
+PROFILE_ID_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
+PROFILE_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9 _.-]{0,62}$")
 UPDATE_HOUR_RE = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
 # Same ordering as updater/update_service.py (separate image, so not imported).
 VERSION_RE = re.compile(r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$")
@@ -288,6 +292,7 @@ def save_env(updates):
 
 def read_status():
     default = {
+        "mode": "legacy",
         "vpn_mode": None,
         "vpn_interface": None,
         "connected": False,
@@ -301,14 +306,18 @@ def read_status():
         "vpn_tx_bytes": "0",
         "vpn_rx_packets": "0",
         "vpn_tx_packets": "0",
+        "exit_node_clients": None,
         "traffic_updated": None,
         "auth_url": "",
         "last_updated": None,
+        "profiles": [],
     }
     if os.path.isfile(STATUS_FILE):
         try:
             with open(STATUS_FILE, "r", encoding="utf-8") as f:
-                default.update(json.load(f))
+                stored = json.load(f)
+            if isinstance(stored, dict):
+                default.update(stored)
         except (json.JSONDecodeError, OSError):
             default["error"] = "could not read status"
 
@@ -321,11 +330,20 @@ def read_status():
         "vpn_tx_bytes",
         "vpn_rx_packets",
         "vpn_tx_packets",
+        "exit_node_clients",
         "traffic_updated",
     }
     for key in traffic_keys:
         if key in default and key != "traffic_updated":
-            default[key] = str(default[key])
+            if key == "exit_node_clients":
+                if default[key] is None:
+                    continue
+                try:
+                    default[key] = max(0, int(default[key]))
+                except (TypeError, ValueError):
+                    default[key] = None
+            else:
+                default[key] = str(default[key])
     if default["connected"] and os.path.isfile(TRAFFIC_FILE):
         try:
             with open(TRAFFIC_FILE, "r", encoding="utf-8") as f:
@@ -334,11 +352,77 @@ def read_status():
                 raise ValueError("traffic status must be a JSON object")
             for key in traffic_keys:
                 if key in traffic:
-                    default[key] = str(traffic[key]) if key != "traffic_updated" else traffic[key]
+                    if key == "traffic_updated":
+                        default[key] = traffic[key]
+                    elif key == "exit_node_clients":
+                        try:
+                            default[key] = max(0, int(traffic[key]))
+                        except (TypeError, ValueError):
+                            default[key] = None
+                    else:
+                        default[key] = str(traffic[key])
         except (json.JSONDecodeError, OSError, TypeError, ValueError):
             default["error"] = "could not read traffic status"
 
     return default
+
+
+def _profile_value(path, key, default=""):
+    if not os.path.isfile(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.rstrip("\r\n")
+                if line.startswith(f"{key}="):
+                    return line.partition("=")[2]
+    except OSError:
+        return default
+    return default
+
+
+def list_profiles():
+    """Return profile metadata without ever returning credential contents."""
+    profiles = []
+    if not os.path.isdir(PROFILES_DIR):
+        return profiles
+
+    stored_runtime = read_status().get("profiles", [])
+    if not isinstance(stored_runtime, list):
+        stored_runtime = []
+    runtime = {
+        item.get("id"): item
+        for item in stored_runtime
+        if isinstance(item, dict) and item.get("id")
+    }
+    try:
+        entries = sorted(os.listdir(PROFILES_DIR))
+    except OSError:
+        return profiles
+
+    for profile_id in entries:
+        if not PROFILE_ID_RE.fullmatch(profile_id):
+            continue
+        profile_dir = os.path.join(PROFILES_DIR, profile_id)
+        metadata_path = os.path.join(profile_dir, "profile.env")
+        if not os.path.isdir(profile_dir) or not os.path.isfile(metadata_path):
+            continue
+        item = {
+            "id": profile_id,
+            "name": _profile_value(metadata_path, "NAME", profile_id),
+            "vpn_type": _profile_value(metadata_path, "VPN_TYPE", "auto"),
+            "ts_hostname": _profile_value(metadata_path, "TS_HOSTNAME", profile_id),
+            "ts_extra_args": _profile_value(metadata_path, "TS_EXTRA_ARGS"),
+            "wireguard": os.path.isfile(os.path.join(profile_dir, "wireguard.conf")),
+            "openvpn": os.path.isfile(os.path.join(profile_dir, "openvpn.ovpn")),
+            "credentials": os.path.isfile(os.path.join(profile_dir, "credentials.txt")),
+            "ts_authkey_set": os.path.isfile(os.path.join(profile_dir, "ts_authkey")),
+            "protonvpn_user_set": os.path.isfile(os.path.join(profile_dir, "protonvpn_user")),
+            "protonvpn_password_set": os.path.isfile(os.path.join(profile_dir, "protonvpn_password")),
+        }
+        item["status"] = runtime.get(profile_id, {})
+        profiles.append(item)
+    return profiles
 
 
 def save_upload(file_storage, dest_dir, dest_name):
@@ -351,6 +435,30 @@ def save_upload(file_storage, dest_dir, dest_name):
         os.chmod(dest_path, 0o600)
     except OSError:
         pass
+
+
+def save_private_file(path, content):
+    parent = os.path.dirname(path)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".profile.", dir=parent, text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+            if not content.endswith("\n"):
+                f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, path)
+    finally:
+        if os.path.exists(temp_path):
+            os.unlink(temp_path)
+
+
+def profile_path(profile_id):
+    if not PROFILE_ID_RE.fullmatch(profile_id):
+        abort(400, "Invalid profile id.")
+    return os.path.join(PROFILES_DIR, profile_id)
 
 
 def files_present_state():
@@ -378,6 +486,7 @@ def build_context(env_values, files_present):
         "env": display_values,
         "secrets_set": secrets_set,
         "files_present": files_present,
+        "profiles": list_profiles(),
         "csrf_token": csrf_token,
         "vpn_type": env_values.get("VPN_TYPE", "auto"),
         "ts_hostname": env_values.get("TS_HOSTNAME", ""),
@@ -392,7 +501,7 @@ def is_first_run(env_values, files_present):
         return False
     has_vpn_config = files_present["wireguard"] or files_present["openvpn_conf"]
     has_tailscale_setup = bool(env_values.get("TS_AUTHKEY"))
-    return not (has_vpn_config or has_tailscale_setup)
+    return not (has_vpn_config or has_tailscale_setup or bool(list_profiles()))
 
 
 @app.route("/healthz", methods=["GET"])
@@ -517,6 +626,97 @@ def save():
     else:
         flash("Configuration saved. Restart both containers to apply the changes "
               "(docker compose up -d --build vpn-tailscale-bridge webui).", "success")
+    return redirect(url_for("index", skip_wizard=1))
+
+
+@app.route("/profile/save", methods=["POST"])
+@require_auth
+def save_profile():
+    token = request.form.get("csrf_token", "")
+    if not token or not hmac.compare_digest(token, session.get("csrf", "")):
+        abort(400, "Invalid CSRF token. Reload the page and try again.")
+
+    profile_id = request.form.get("profile_id", "").strip().lower()
+    if not PROFILE_ID_RE.fullmatch(profile_id):
+        flash("Invalid profile id. Use lowercase letters, numbers, and hyphens.", "error")
+        return redirect(url_for("index", skip_wizard=1))
+
+    name = request.form.get("profile_name", "").strip()
+    hostname = request.form.get("profile_hostname", "").strip() or f"protonvpn-{profile_id}"
+    vpn_type = request.form.get("profile_vpn_type", "auto").strip().lower()
+    if not name:
+        name = profile_id
+    if not PROFILE_NAME_RE.fullmatch(name):
+        flash("Invalid profile name. Use letters, numbers, spaces, dots, underscores, or hyphens.", "error")
+        return redirect(url_for("index", skip_wizard=1))
+    if not HOSTNAME_RE.fullmatch(hostname):
+        flash("Invalid Tailscale hostname for this profile.", "error")
+        return redirect(url_for("index", skip_wizard=1))
+    if vpn_type not in ("auto", "wireguard", "openvpn"):
+        flash("Invalid VPN type for this profile.", "error")
+        return redirect(url_for("index", skip_wizard=1))
+
+    values = {
+        "ID": profile_id,
+        "NAME": name,
+        "VPN_TYPE": vpn_type,
+        "TS_HOSTNAME": hostname,
+        "TS_EXTRA_ARGS": request.form.get("profile_ts_extra_args", "").strip(),
+    }
+    for value in values.values():
+        if "\n" in value or "\r" in value:
+            abort(400, "Invalid profile value.")
+
+    directory = profile_path(profile_id)
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
+    save_private_file(
+        os.path.join(directory, "profile.env"),
+        "".join(f"{key}={value}\n" for key, value in values.items()),
+    )
+
+    uploads = (
+        ("profile_wg_conf", "wireguard.conf"),
+        ("profile_ovpn_conf", "openvpn.ovpn"),
+        ("profile_ovpn_creds", "credentials.txt"),
+    )
+    for field, filename in uploads:
+        uploaded = request.files.get(field)
+        if uploaded and uploaded.filename:
+            save_upload(uploaded, directory, filename)
+
+    secrets_to_save = (
+        ("profile_ts_authkey", "ts_authkey"),
+        ("profile_protonvpn_user", "protonvpn_user"),
+        ("profile_protonvpn_password", "protonvpn_password"),
+    )
+    for field, filename in secrets_to_save:
+        value = request.form.get(field, "").strip()
+        if value:
+            if "\n" in value or "\r" in value:
+                abort(400, "Invalid profile secret.")
+            save_private_file(os.path.join(directory, filename), value)
+
+    flash(f"Profile '{name}' saved. Restart the bridge to create or update its exit node.", "success")
+    return redirect(url_for("index", skip_wizard=1))
+
+
+@app.route("/profile/delete", methods=["POST"])
+@require_auth
+def delete_profile():
+    token = request.form.get("csrf_token", "")
+    if not token or not hmac.compare_digest(token, session.get("csrf", "")):
+        abort(400, "Invalid CSRF token. Reload the page and try again.")
+    profile_id = request.form.get("profile_id", "").strip().lower()
+    directory = profile_path(profile_id)
+    if not os.path.isdir(directory):
+        flash("Profile not found.", "error")
+        return redirect(url_for("index", skip_wizard=1))
+    shutil.rmtree(directory)
+    flash(f"Profile '{profile_id}' removed. Restart the bridge to remove its exit node.", "success")
     return redirect(url_for("index", skip_wizard=1))
 
 

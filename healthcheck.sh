@@ -1,6 +1,16 @@
 #!/bin/sh
 set -eu
 
+if grep -q '"mode":"multi"' /var/run/bridge-status/status.json 2>/dev/null; then
+    grep -q '"connected":true' /var/run/bridge-status/status.json
+    interface=$(grep -o '"vpn_interface":"[^"]*"' /var/run/bridge-status/status.json | head -n1 | cut -d'"' -f4)
+    [ -n "$interface" ]
+    ip addr show dev "$interface" | grep -q 'inet '
+    curl --interface "$interface" --fail --silent --show-error --max-time 10 \
+        "${VPN_HEALTHCHECK_URL:-https://api.ipify.org}" >/dev/null
+    exit 0
+fi
+
 tailscale status >/dev/null 2>&1
 grep -q '\"connected\": true' /var/run/bridge-status/status.json
 
