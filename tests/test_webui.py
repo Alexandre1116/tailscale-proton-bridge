@@ -32,6 +32,18 @@ def test_authentication_required(client):
     assert response.get_json()["connected"] is False
 
 
+def test_assets_are_not_served_from_a_stale_browser_cache(client, monkeypatch):
+    monkeypatch.setattr(webapp, "APP_VERSION", "v9.9.9")
+
+    page = client.get("/", headers=auth_header(), follow_redirects=True)
+    script = client.get("/static/app.js")
+
+    assert "app.js?v=v9.9.9" in page.get_data(as_text=True)
+    assert "style.css?v=v9.9.9" in page.get_data(as_text=True)
+    assert script.headers["Cache-Control"] == "no-cache"
+    assert client.get("/api/updates", headers=auth_header()).headers["Cache-Control"] == "no-cache"
+
+
 def test_invalid_credentials_are_rejected(client):
     response = client.get("/api/status", headers=auth_header(password="wrong"))
     assert response.status_code == 401

@@ -84,7 +84,16 @@ def add_security_headers(response):
     response.headers.setdefault("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'")
     if WEBUI_PROTOCOL == "https":
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
+    # Browsers otherwise cache app.js heuristically and keep running an old
+    # release's update logic after an upgrade.
+    response.headers.setdefault("Cache-Control", "no-cache")
     return response
+
+
+@app.context_processor
+def inject_asset_version():
+    # Changes the static asset URLs on every release, bypassing old caches.
+    return {"asset_version": APP_VERSION}
 
 SECRET_ENV_KEYS = {"TS_AUTHKEY", "PROTONVPN_PASSWORD", "WEBUI_PASSWORD"}
 ENV_FIELDS = [
