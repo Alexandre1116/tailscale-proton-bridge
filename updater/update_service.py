@@ -25,6 +25,7 @@ POLL_INTERVAL = max(int(os.environ.get("UPDATE_POLL_INTERVAL", "30")), 5)
 # The Web UI runs unprivileged; it must read state.json and write request.json.
 STATE_UID = int(os.environ.get("UPDATE_STATE_UID", "100"))
 STATE_GID = int(os.environ.get("UPDATE_STATE_GID", "101"))
+UPDATE_HELPER = os.environ.get("UPDATE_HELPER_NAME", "protonvpn-tailscale-update-helper")
 TAG_RE = re.compile(r"^v?[0-9]+(?:\.[0-9]+){2}(?:[-.][0-9A-Za-z.-]+)?$")
 VERSION_RE = re.compile(r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$")
 
@@ -220,6 +221,9 @@ def install_release(state, requested_tag=None):
             "project path on the Docker host, then recreate the updater"
         )
 
+    if collect_update(state):
+        raise RuntimeError("An update is already running")
+
     state["status"] = "installing"
     state["error"] = None
     write_state(state)
@@ -245,15 +249,63 @@ def install_release(state, requested_tag=None):
         "-f", os.path.join(WORKSPACE, "docker-compose.yml"),
         "up", "-d", "--build", "vpn-tailscale-bridge", "webui", "updater",
     ]
-    result = run(compose)
+    # Compose recreates this container, which would kill a Compose process
+    # running inside it and leave the stack stopped. Run it in a detached
+    # helper outside the project; the next updater collects its result.
+    helper = [
+        "docker", "run", "--detach", "--name", UPDATE_HELPER,
+        "--read-only", "--tmpfs", "/tmp", "--env", "DOCKER_CONFIG=/tmp/.docker",
+        "--security-opt", "no-new-privileges:true",
+        "--volume", f"{WORKSPACE}:{WORKSPACE}",
+        "--volume", "/var/run/docker.sock:/var/run/docker.sock",
+        "--workdir", WORKSPACE, own_image(),
+    ] + compose
+    result = run(helper)
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "Docker Compose update failed")
-    state["current_version"] = tag
-    state["update_available"] = False
-    state["status"] = "updated"
-    state["last_update"] = now_iso()
-    state["error"] = None
+        raise RuntimeError(result.stderr.strip() or "Could not start the update helper")
+
+
+def own_image():
+    result = run(["docker", "inspect", "--format", "{{.Image}}", os.environ.get("HOSTNAME", "")])
+    image = result.stdout.strip() if result.returncode == 0 else ""
+    if not image:
+        raise RuntimeError("Could not find the updater image to run the update helper")
+    return image
+
+
+def helper_state():
+    """Return None without a helper container, else (running, exit_code)."""
+    result = run(["docker", "inspect", "--format", "{{.State.Running}} {{.State.ExitCode}}", UPDATE_HELPER])
+    if result.returncode != 0:
+        return None
+    running, _, code = result.stdout.strip().partition(" ")
+    try:
+        return running == "true", int(code)
+    except ValueError:
+        return running == "true", 1
+
+
+def collect_update(state):
+    """Record a finished helper's result. Returns True while it is still running."""
+    helper = helper_state()
+    if helper is None:
+        return False
+    running, exit_code = helper
+    if running:
+        return True
+    if exit_code == 0:
+        state["update_available"] = False
+        state["status"] = "updated"
+        state["last_update"] = now_iso()
+        state["error"] = None
+    else:
+        logs = run(["docker", "logs", "--tail", "20", UPDATE_HELPER])
+        output = (logs.stdout + logs.stderr).strip()
+        state["status"] = "error"
+        state["error"] = (output or f"Docker Compose update failed with exit code {exit_code}")[-500:]
     write_state(state)
+    run(["docker", "rm", "--force", UPDATE_HELPER])
+    return False
 
 
 def handle_request(state, request_data):
@@ -292,8 +344,13 @@ def main():
     state = read_state()
     write_state(state)
     # Populate the banner soon after startup; subsequent automatic checks are daily.
-    check_release(state)
+    if not collect_update(state):
+        check_release(state)
     while True:
+        state = read_state()
+        if collect_update(state):
+            time.sleep(POLL_INTERVAL)
+            continue
         state = read_state()
         try:
             with open(REQUEST_PATH, "r", encoding="utf-8") as stream:

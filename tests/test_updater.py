@@ -103,26 +103,96 @@ def test_install_requires_matching_host_project_path(monkeypatch, tmp_path):
     assert commands == []
 
 
-def test_install_rebuilds_the_updater_service(monkeypatch, tmp_path):
+class Result:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def fake_docker(commands, helper=None, logs=""):
+    """Fake run(): helper is None (absent) or the "running exit_code" inspect output."""
+    def fake_run(command):
+        commands.append(command)
+        if command[:2] == ["docker", "inspect"] and command[-1] == update_service.UPDATE_HELPER:
+            return Result(1) if helper is None else Result(stdout=helper)
+        if command[:2] == ["docker", "inspect"]:
+            return Result(stdout="sha256:updater")
+        if command[:2] == ["docker", "logs"]:
+            return Result(stderr=logs)
+        return Result()
+
+    return fake_run
+
+
+def prepare_install(monkeypatch, tmp_path):
     (tmp_path / ".env").write_text(f"UPDATE_HOST_PROJECT_PATH={tmp_path}\n", encoding="utf-8")
     monkeypatch.setattr(update_service, "WORKSPACE", str(tmp_path))
     monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setattr(update_service, "update_env_version", lambda tag: None)
+
+
+def test_install_runs_compose_in_a_detached_helper(monkeypatch, tmp_path):
+    prepare_install(monkeypatch, tmp_path)
     commands = []
-
-    class Result:
-        returncode = 0
-        stdout = ""
-        stderr = ""
-
-    def fake_run(command):
-        commands.append(command)
-        return Result()
-
-    monkeypatch.setattr(update_service, "run", fake_run)
+    monkeypatch.setattr(update_service, "run", fake_docker(commands))
     state = {"latest_version": "v0.2.0"}
 
     update_service.install_release(state)
 
-    compose_command = commands[-1]
-    assert compose_command[-3:] == ["vpn-tailscale-bridge", "webui", "updater"]
+    helper_command = commands[-1]
+    # Compose must not run inside the updater, which it recreates.
+    assert not any(command[:2] == ["docker", "compose"] for command in commands)
+    assert helper_command[:4] == ["docker", "run", "--detach", "--name"]
+    assert "sha256:updater" in helper_command
+    assert "DOCKER_CONFIG=/tmp/.docker" in helper_command
+    assert helper_command[-3:] == ["vpn-tailscale-bridge", "webui", "updater"]
+    assert state["status"] == "installing"
+
+
+def test_install_refuses_while_a_helper_is_running(monkeypatch, tmp_path):
+    prepare_install(monkeypatch, tmp_path)
+    commands = []
+    monkeypatch.setattr(update_service, "run", fake_docker(commands, helper="true 0"))
+
+    with pytest.raises(RuntimeError, match="already running"):
+        update_service.install_release({"latest_version": "v0.2.0"})
+
+    assert not any(command[:2] == ["docker", "run"] for command in commands)
+
+
+def test_collect_update_records_success_and_removes_helper(monkeypatch, tmp_path):
+    monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state.json"))
+    commands = []
+    monkeypatch.setattr(update_service, "run", fake_docker(commands, helper="false 0"))
+    state = {"status": "installing", "update_available": True}
+
+    assert update_service.collect_update(state) is False
+
+    assert state["status"] == "updated"
+    assert state["update_available"] is False
+    assert commands[-1] == ["docker", "rm", "--force", update_service.UPDATE_HELPER]
+
+
+def test_collect_update_reports_compose_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state.json"))
+    commands = []
+    monkeypatch.setattr(update_service, "run", fake_docker(commands, helper="false 1", logs="build failed"))
+    state = {"status": "installing"}
+
+    assert update_service.collect_update(state) is False
+
+    assert state["status"] == "error"
+    assert state["error"] == "build failed"
+
+
+def test_collect_update_waits_for_a_running_helper(monkeypatch, tmp_path):
+    monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state.json"))
+    commands = []
+    monkeypatch.setattr(update_service, "run", fake_docker(commands, helper="true 0"))
+    state = {"status": "installing"}
+
+    assert update_service.collect_update(state) is True
+
+    assert state["status"] == "installing"
+    assert not any(command[:2] == ["docker", "rm"] for command in commands)
