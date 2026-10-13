@@ -163,6 +163,27 @@ def test_update_status_reads_shared_state(client, tmp_path, monkeypatch):
     assert response.get_json()["latest_version"] == "v0.2.0"
 
 
+def test_update_status_ignores_stale_installed_version(client, tmp_path, monkeypatch):
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps({
+            "current_version": "v0.1.3",
+            "latest_version": "v0.1.4",
+            "update_available": True,
+            "status": "update_available",
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webapp, "UPDATE_STATE_PATH", str(state_path))
+    monkeypatch.setattr(webapp, "APP_VERSION", "v0.1.4")
+
+    data = client.get("/api/updates", headers=auth_header()).get_json()
+
+    assert data["current_version"] == "v0.1.4"
+    assert data["update_available"] is False
+    assert data["status"] == "up_to_date"
+
+
 def test_update_check_requires_csrf_and_queues_request(client, tmp_path, monkeypatch):
     request_path = tmp_path / "request.json"
     monkeypatch.setattr(webapp, "UPDATE_REQUEST_PATH", str(request_path))

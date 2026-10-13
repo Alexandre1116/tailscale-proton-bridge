@@ -138,7 +138,12 @@ def read_update_state():
         except (json.JSONDecodeError, OSError, TypeError):
             state["status"] = "error"
             state["error"] = "Could not read updater state. Restart the updater so it can fix the permissions of updater/state."
-    state["current_version"] = state.get("current_version") or APP_VERSION
+    # The running release is authoritative; the saved value can be stale.
+    state["current_version"] = APP_VERSION
+    if state.get("latest_version") == APP_VERSION:
+        state["update_available"] = False
+        if state.get("status") == "update_available":
+            state["status"] = "up_to_date"
     return state
 
 

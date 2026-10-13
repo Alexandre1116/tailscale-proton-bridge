@@ -73,6 +73,23 @@ def test_web_ui_image_uses_the_updater_state_ids():
     assert f"adduser -S -u {update_service.STATE_UID} -G webui webui" in dockerfile
 
 
+def test_installed_version_comes_from_env_not_saved_state(monkeypatch, tmp_path):
+    (tmp_path / ".env").write_text("APP_VERSION=v0.1.4\n", encoding="utf-8")
+    (tmp_path / "state.json").write_text(
+        '{"current_version": "v0.1.3", "latest_version": "v0.1.4", '
+        '"update_available": true, "status": "update_available"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(update_service, "WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state.json"))
+
+    state = update_service.read_state()
+
+    assert state["current_version"] == "v0.1.4"
+    assert state["update_available"] is False
+    assert state["status"] == "up_to_date"
+
+
 def test_install_requires_matching_host_project_path(monkeypatch, tmp_path):
     (tmp_path / ".env").write_text("UPDATE_HOST_PROJECT_PATH=\n", encoding="utf-8")
     monkeypatch.setattr(update_service, "WORKSPACE", str(tmp_path))
