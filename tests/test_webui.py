@@ -184,6 +184,22 @@ def test_update_status_ignores_stale_installed_version(client, tmp_path, monkeyp
     assert data["status"] == "up_to_date"
 
 
+@pytest.mark.parametrize("latest", ["v0.1.4", "0.1.4", "v0.1.3"])
+def test_update_status_compares_versions_not_strings(client, tmp_path, monkeypatch, latest):
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps({"latest_version": latest, "update_available": True, "status": "update_available"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(webapp, "UPDATE_STATE_PATH", str(state_path))
+    monkeypatch.setattr(webapp, "APP_VERSION", "v0.1.5")
+
+    data = client.get("/api/updates", headers=auth_header()).get_json()
+
+    assert data["update_available"] is False
+    assert data["status"] == "up_to_date"
+
+
 def test_update_check_requires_csrf_and_queues_request(client, tmp_path, monkeypatch):
     request_path = tmp_path / "request.json"
     monkeypatch.setattr(webapp, "UPDATE_REQUEST_PATH", str(request_path))

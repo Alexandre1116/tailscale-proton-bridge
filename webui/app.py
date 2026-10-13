@@ -108,6 +108,17 @@ ENV_FIELDS = [
 
 HOSTNAME_RE = re.compile(r"^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$")
 UPDATE_HOUR_RE = re.compile(r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
+# Same ordering as updater/update_service.py (separate image, so not imported).
+VERSION_RE = re.compile(r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-([0-9A-Za-z.-]+))?$")
+
+
+def version_key(value):
+    match = VERSION_RE.fullmatch(value or "")
+    if not match:
+        return None
+    major, minor, patch, prerelease = match.groups()
+    pre_key = (1, "") if not prerelease else (0, prerelease)
+    return (int(major), int(minor or 0), int(patch or 0), pre_key)
 
 
 def update_state_defaults():
@@ -140,10 +151,12 @@ def read_update_state():
             state["error"] = "Could not read updater state. Restart the updater so it can fix the permissions of updater/state."
     # The running release is authoritative; the saved value can be stale.
     state["current_version"] = APP_VERSION
-    if state.get("latest_version") == APP_VERSION:
-        state["update_available"] = False
-        if state.get("status") == "update_available":
-            state["status"] = "up_to_date"
+    latest = version_key(state.get("latest_version"))
+    current = version_key(APP_VERSION)
+    if latest is not None and current is not None:
+        state["update_available"] = latest > current
+        if state.get("status") in ("update_available", "up_to_date"):
+            state["status"] = "update_available" if state["update_available"] else "up_to_date"
     return state
 
 
