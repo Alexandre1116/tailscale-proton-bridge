@@ -176,6 +176,7 @@ def test_update_status_reads_shared_state(client, tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(webapp, "UPDATE_STATE_PATH", str(state_path))
+    monkeypatch.setattr(webapp, "APP_VERSION", "v0.1.0")
 
     response = client.get("/api/updates", headers=auth_header())
 

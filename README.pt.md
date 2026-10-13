@@ -8,7 +8,7 @@
 [![Proton VPN](https://img.shields.io/badge/Proton_VPN-WireGuard_%2F_OpenVPN-purple?logo=protonvpn)](https://protonvpn.com)
 [![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-brightgreen)](#)
 
-Release atual: [`v0.1.8`](https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.1.8)
+Release atual: [`v0.2.0`](https://github.com/Alexandre1116/tailscale-proton-bridge/releases/tag/v0.2.0)
 
 Este projeto permite criar um container Docker que funciona como uma ponte (bridge) entre o **Proton VPN** (incluindo o plano **Free/Gratuito**) e a sua rede privada **Tailscale (Tailnet)**, atuando como um **Exit Node** (Nó de Saída). 
 
@@ -176,7 +176,7 @@ O dashboard também mostra o número de dispositivos com sessões encaminhadas a
 O updater é um serviço separado. Apenas ele tem acesso ao Docker socket; a Web UI comunica através de `./updater/state`. Em Linux/Synology, defina no `.env` o caminho absoluto do projeto no anfitrião:
 
 ```dotenv
-APP_VERSION=v0.1.8
+APP_VERSION=v0.2.0
 GITHUB_REPOSITORY=Alexandre1116/tailscale-proton-bridge
 AUTO_UPDATE_ENABLED=0
 AUTO_UPDATE_HOUR=03:00
