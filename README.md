@@ -181,7 +181,23 @@ UPDATE_HOST_PROJECT_PATH=/volume1/docker/tailscale-proton-bridge
 
 Start all services with `docker compose up -d --build`. With automatic updates
 disabled, use **Check now** and **Install available update** in the dashboard.
-The updater refuses to install over local Git changes.
+The updater refuses to install over local Git changes, and refuses to run when
+`UPDATE_HOST_PROJECT_PATH` is empty or differs from the mounted path.
+
+### Docker inside an LXC container (Proxmox)
+
+If the bridge fails to start under Docker-in-LXC because of AppArmor, set
+`BRIDGE_SECURITY_OPT=apparmor=unconfined` in `.env` instead of editing
+`docker-compose.yml`. Local edits block the updater.
+
+### Direct Tailscale connections
+
+By default (`TS_DIRECT_UNDERLAY=1`), only tailscaled's own WireGuard UDP port
+(`TS_PORT`, default `41641`) leaves through the local network. Exit node
+traffic, DNS, the control plane and DERP still go through Proton VPN. Without
+this, Proton's NAT forces every peer onto a DERP relay. Peers can see your
+real public IP as a Tailscale endpoint; set `TS_DIRECT_UNDERLAY=0` if you
+prefer to keep everything inside the tunnel.
 
 ---
 

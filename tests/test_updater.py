@@ -1,5 +1,7 @@
 from datetime import datetime
 
+import pytest
+
 from updater import update_service
 
 
@@ -34,7 +36,21 @@ def test_scheduled_check_requires_enabled_setting(monkeypatch):
     assert update_service.scheduled_check_due({"last_auto_check": "2026-09-17"}, {"AUTO_UPDATE_ENABLED": "1", "AUTO_UPDATE_HOUR": "04:30"}) is False
 
 
+def test_install_requires_matching_host_project_path(monkeypatch, tmp_path):
+    (tmp_path / ".env").write_text("UPDATE_HOST_PROJECT_PATH=\n", encoding="utf-8")
+    monkeypatch.setattr(update_service, "WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state.json"))
+    commands = []
+    monkeypatch.setattr(update_service, "run", lambda command: commands.append(command))
+
+    with pytest.raises(RuntimeError, match="UPDATE_HOST_PROJECT_PATH"):
+        update_service.install_release({"latest_version": "v0.2.0"})
+
+    assert commands == []
+
+
 def test_install_rebuilds_the_updater_service(monkeypatch, tmp_path):
+    (tmp_path / ".env").write_text(f"UPDATE_HOST_PROJECT_PATH={tmp_path}\n", encoding="utf-8")
     monkeypatch.setattr(update_service, "WORKSPACE", str(tmp_path))
     monkeypatch.setattr(update_service, "STATE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setattr(update_service, "update_env_version", lambda tag: None)

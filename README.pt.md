@@ -168,7 +168,15 @@ Depois inicie todos os serviços:
 docker compose up -d --build
 ```
 
-`AUTO_UPDATE_ENABLED=0` deixa as atualizações sob controlo manual. O updater instala apenas tags de releases válidas e recusa continuar se existirem alterações locais no Git. O serviço consulta a API pública de releases do GitHub. Se a rede estiver indisponível, a última informação permanece visível e a tentativa seguinte é feita normalmente.
+`AUTO_UPDATE_ENABLED=0` deixa as atualizações sob controlo manual. O updater instala apenas tags de releases válidas e recusa continuar se existirem alterações locais no Git. O serviço consulta a API pública de releases do GitHub. Se a rede estiver indisponível, a última informação permanece visível e a tentativa seguinte é feita normalmente. O updater também recusa continuar se `UPDATE_HOST_PROJECT_PATH` estiver vazio ou for diferente do caminho montado.
+
+### Docker dentro de um container LXC (Proxmox)
+
+Se a bridge não arrancar em Docker-in-LXC por causa do AppArmor, defina `BRIDGE_SECURITY_OPT=apparmor=unconfined` no `.env` em vez de editar o `docker-compose.yml`. Alterações locais bloqueiam o updater.
+
+### Ligações diretas do Tailscale
+
+Por defeito (`TS_DIRECT_UNDERLAY=1`), apenas a porta UDP WireGuard do próprio tailscaled (`TS_PORT`, por defeito `41641`) sai pela rede local. O tráfego do exit node, o DNS, o plano de controlo e os relays DERP continuam a passar pela Proton VPN. Sem isto, o NAT da Proton obriga todos os peers a usar relays DERP. Os peers podem ver o seu IP público real como endpoint do Tailscale; defina `TS_DIRECT_UNDERLAY=0` se preferir manter tudo dentro do túnel.
 
 ---
 
