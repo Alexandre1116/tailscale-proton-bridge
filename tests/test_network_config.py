@@ -32,6 +32,15 @@ def test_compose_does_not_force_an_apparmor_profile_by_default():
     assert "apparmor=${" not in compose
 
 
+def test_read_only_updater_has_a_writable_docker_config():
+    compose = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+    updater = compose[compose.index("\n  updater:"):compose.index("\nvolumes:")]
+
+    assert "read_only: true" in updater
+    assert "tmpfs:\n      - /tmp" in updater
+    assert "DOCKER_CONFIG=/tmp/.docker" in updater
+
+
 def test_compose_exposes_both_forwarding_sysctls():
     compose = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
 

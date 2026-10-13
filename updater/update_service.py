@@ -105,6 +105,7 @@ def default_state():
 
 def read_state():
     state = default_state()
+    installed = state["current_version"]
     try:
         with open(STATE_PATH, "r", encoding="utf-8") as stream:
             saved = json.load(stream)
@@ -112,6 +113,15 @@ def read_state():
             state.update(saved)
     except (OSError, json.JSONDecodeError, TypeError):
         pass
+    # APP_VERSION is the installed release; a saved value goes stale after a
+    # manual or partially failed update and would re-offer the same release.
+    state["current_version"] = installed
+    latest = version_key(state.get("latest_version"))
+    current = version_key(installed)
+    if latest is not None and current is not None:
+        state["update_available"] = latest > current
+        if state.get("status") in ("update_available", "up_to_date"):
+            state["status"] = "update_available" if state["update_available"] else "up_to_date"
     return state
 
 
