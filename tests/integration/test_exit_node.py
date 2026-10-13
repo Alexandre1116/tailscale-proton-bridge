@@ -1,4 +1,5 @@
 import os
+import shlex
 import shutil
 import subprocess
 import time
@@ -10,6 +11,8 @@ CLIENT = os.environ.get("TS_CLIENT_CONTAINER")
 BRIDGE = os.environ.get("TS_BRIDGE_CONTAINER", "protonvpn-tailscale-bridge")
 EXIT_NODE = os.environ.get("TS_EXIT_NODE")
 PUBLIC_IP_URL = os.environ.get("PUBLIC_IP_URL", "https://api.ipify.org")
+BRIDGE_TAILSCALE_SOCKET = os.environ.get("TS_BRIDGE_TAILSCALE_SOCKET", "")
+BRIDGE_VPN_INTERFACE = os.environ.get("TS_BRIDGE_VPN_INTERFACE", "protonvpn")
 
 pytestmark = pytest.mark.integration
 
@@ -22,6 +25,13 @@ def docker_exec(container, command, check=True):
     return run("docker", "exec", container, "sh", "-c", command, check=check)
 
 
+def bridge_tailscale(command):
+    socket_arg = ""
+    if BRIDGE_TAILSCALE_SOCKET:
+        socket_arg = f"--socket={shlex.quote(BRIDGE_TAILSCALE_SOCKET)} "
+    return f"tailscale {socket_arg}{command}"
+
+
 @pytest.fixture(scope="module", autouse=True)
 def integration_environment():
     if not shutil.which("docker") or not CLIENT or not EXIT_NODE:
@@ -31,14 +41,17 @@ def integration_environment():
     run("docker", "inspect", CLIENT)
     run("docker", "inspect", BRIDGE)
     docker_exec(CLIENT, "tailscale status")
-    docker_exec(BRIDGE, "tailscale status")
+    docker_exec(BRIDGE, bridge_tailscale("status"))
     yield
     # Never leave the client using the test exit node after the test run.
     docker_exec(CLIENT, "tailscale set --exit-node=", check=False)
 
 
 def public_ip(container):
-    result = docker_exec(container, f"curl -4fsS --max-time 10 {PUBLIC_IP_URL}")
+    interface_arg = ""
+    if container == BRIDGE:
+        interface_arg = f" --interface {shlex.quote(BRIDGE_VPN_INTERFACE)}"
+    result = docker_exec(container, f"curl -4fsS --max-time 10{interface_arg} {shlex.quote(PUBLIC_IP_URL)}")
     return result.stdout.strip()
 
 
@@ -61,7 +74,7 @@ def test_client_uses_proton_exit_node():
 
 def test_vpn_down_blocks_forwarded_traffic():
     select_exit_node()
-    interface = os.environ.get("TS_BRIDGE_VPN_INTERFACE", "protonvpn")
+    interface = BRIDGE_VPN_INTERFACE
     docker_exec(BRIDGE, f"ip link set dev {interface} down")
     try:
         result = docker_exec(

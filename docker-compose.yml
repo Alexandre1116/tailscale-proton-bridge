@@ -26,6 +26,8 @@ services:
       - net.ipv4.conf.all.src_valid_mark=1
       # Tailscale checks both forwarding sysctls for exit nodes.
       # IPv6 traffic remains disabled and blocked to avoid VPN leaks.
+      # Tailscale checks both forwarding sysctls when a node advertises an exit node.
+      # IPv6 traffic remains disabled and blocked below to avoid VPN leaks.
       - net.ipv6.conf.all.forwarding=1
       - net.ipv6.conf.default.forwarding=1
       - net.ipv6.conf.all.disable_ipv6=1
@@ -35,6 +37,8 @@ services:
       # Pastas onde colocará as configurações de VPN (.conf para WireGuard ou .ovpn/.txt para OpenVPN)
       - ./vpn/wireguard:/etc/wireguard:ro
       - ./vpn/openvpn:/etc/openvpn:ro
+      # Perfis multi-localização, cada um com a sua VPN e identidade Tailscale.
+      - ./vpn/profiles:/etc/bridge-profiles:ro
       # Opcional: ficheiros root-only para TS_AUTHKEY e credenciais OpenVPN.
       - ./secrets:/run/secrets:ro
       # Volume persistente para o estado do Tailscale
@@ -65,6 +69,7 @@ services:
       # sai pela rede local, permitindo ligações diretas em vez de relays DERP.
       - TS_PORT=${TS_PORT:-41641}
       - TS_DIRECT_UNDERLAY=${TS_DIRECT_UNDERLAY:-1}
+      - MULTI_PROFILE_ENABLED=${MULTI_PROFILE_ENABLED:-1}
 
     healthcheck:
       test: ["CMD", "/healthcheck.sh"]
@@ -91,6 +96,8 @@ services:
       # o upload dos ficheiros .conf/.ovpn/credentials.txt a partir da Web UI
       - ./vpn/wireguard:/data/vpn/wireguard
       - ./vpn/openvpn:/data/vpn/openvpn
+      # A Web UI gere os perfis sem expor os segredos ao browser.
+      - ./vpn/profiles:/data/vpn/profiles
       # O próprio ficheiro .env do projeto, para a Web UI poder ler/gravar as variáveis
       - ./.env:/data/.env
       # Required only when WEBUI_PROTOCOL=https.
@@ -117,6 +124,7 @@ services:
       - UPDATE_REQUEST_PATH=/data/update-state/request.json
       - WEBUI_CERT_FILE=${WEBUI_CERT_FILE:-/certs/fullchain.pem}
       - WEBUI_KEY_FILE=${WEBUI_KEY_FILE:-/certs/privkey.pem}
+      - MULTI_PROFILE_ENABLED=${MULTI_PROFILE_ENABLED:-1}
 
     healthcheck:
       test: ["CMD", "./healthcheck.sh"]

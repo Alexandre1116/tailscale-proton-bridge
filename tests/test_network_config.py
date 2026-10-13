@@ -47,3 +47,9 @@ def test_compose_exposes_both_forwarding_sysctls():
     assert "net.ipv4.ip_forward=1" in compose
     assert "net.ipv6.conf.all.forwarding=1" in compose
     assert "net.ipv6.conf.default.forwarding=1" in compose
+
+
+def test_compose_enables_multi_profile_mode_by_default():
+    compose = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "MULTI_PROFILE_ENABLED=${MULTI_PROFILE_ENABLED:-1}" in compose

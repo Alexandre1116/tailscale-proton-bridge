@@ -83,6 +83,10 @@ code, input, select, .eyebrow, .brand-text p, .title-block dt, .traffic-stat sma
 .traffic-stat strong { display: block; margin-top: 2px; color: #f5efe5; font-size: 1.05rem; font-weight: 700; }
 .traffic-stat small { display: block; color: #809399; font-size: 0.65rem; }
 .traffic-stat-highlight strong { color: var(--orange); }
+.exit-node-usage { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 10px; padding: 10px 13px; border: 1px solid rgba(78, 198, 165, 0.28); border-radius: 8px; background: rgba(78, 198, 165, 0.08); }
+.exit-node-usage span, .exit-node-usage small { display: block; color: #aab8bb; font-size: 0.7rem; }
+.exit-node-usage strong { display: block; margin-top: 1px; color: var(--teal); font-size: 1.15rem; }
+.exit-node-usage small { color: #809399; font-family: var(--font-mono); font-size: 0.65rem; text-align: right; }
 .status-line { display: flex; justify-content: space-between; gap: 12px; padding: 10px 2px 1px; color: #9eb0b4; font-size: 0.66rem; }
 
 .action-strip { display: none; align-items: center; gap: 12px; margin-bottom: 22px; padding: 13px 15px; border: 1px solid #754235; border-radius: 10px; background: #241a1a; color: var(--ink); }
@@ -97,6 +101,21 @@ code, input, select, .eyebrow, .brand-text p, .title-block dt, .traffic-stat sma
 .update-banner .btn { flex: 0 0 auto; }
 
 .panel { position: relative; margin-bottom: 20px; padding: 24px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 3px 12px rgba(0, 0, 0, 0.2); }
+.profiles-panel h3 { margin: 0; color: var(--ink); font-size: 0.98rem; }
+.profile-card { margin-top: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-muted); }
+.profile-heading { display: flex; justify-content: space-between; gap: 14px; align-items: flex-start; }
+.profile-id { color: var(--muted); font-family: var(--font-mono); font-size: 0.68rem; }
+.profile-state { font-family: var(--font-mono); font-size: 0.68rem; text-transform: uppercase; }
+.profile-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.profile-uploads, .profile-secrets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 14px; margin-top: 10px; }
+.profile-uploads input[type=file] { width: 100%; color: var(--muted); font-size: 0.68rem; }
+.profile-delete { margin: -10px 0 14px; text-align: right; }
+.profile-runtime-list { display: grid; gap: 8px; }
+.runtime-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 18px; align-items: center; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-muted); }
+.runtime-row strong, .runtime-row small { display: block; }
+.runtime-row small, .runtime-ip, .runtime-state { color: var(--muted); font-family: var(--font-mono); font-size: 0.68rem; }
+.runtime-state.state-ok { color: var(--teal); }
+.runtime-state.state-off { color: var(--orange-dark); }
 .panel > h2, .step-card h2 { margin: 0 0 5px; color: var(--ink); font-size: 1.1rem; letter-spacing: -0.02em; }
 .panel > p.lede { margin: 0 0 18px; color: var(--muted); font-size: 0.86rem; }
 .config-panel > form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 28px; }
@@ -169,6 +188,9 @@ footer.page-footer { padding-top: 28px; color: var(--muted); font-family: var(--
   .title-block { width: 100%; }
   .title-block dl { flex: 1; }
   .config-panel > form { display: block; }
+  .profile-fields, .profile-uploads, .profile-secrets { display: block; }
+  .runtime-row { grid-template-columns: 1fr auto; gap: 5px 12px; }
+  .runtime-ip { grid-column: 1 / -1; }
   .schematic-panel { padding: 18px 16px 10px; }
   .traffic-stats { grid-template-columns: repeat(2, 1fr); }
   .traffic-stat:nth-child(2) { border-right: 0; }
@@ -182,6 +204,8 @@ footer.page-footer { padding-top: 28px; color: var(--muted); font-family: var(--
   .panel-heading { display: block; }
   .live-badge { margin-top: 12px; }
   .status-line { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .exit-node-usage { align-items: flex-start; flex-direction: column; gap: 4px; }
+  .exit-node-usage small { text-align: left; }
   .action-strip { align-items: flex-start; flex-wrap: wrap; }
   .action-strip p { flex-basis: calc(100% - 24px); }
   .action-strip .btn { margin-left: 20px; }

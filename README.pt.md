@@ -150,6 +150,27 @@ Além do terminal, o projeto inclui uma interface web intuitiva para gerir a bri
 
 6. **Atualizações**: O painel consulta a release estável mais recente no GitHub e mostra um aviso quando existe uma versão nova. Use **Install available update** para atualizar com um clique. Em **Automatic updates**, ative a verificação diária e escolha a hora local do anfitrião. Quando encontrar uma release nova, o updater instala-a e reconstrói os dois serviços.
 
+### Vários exit nodes e localizações
+
+A Web UI permite criar vários perfis Proton VPN no mesmo bridge. Cada perfil tem:
+
+* um ficheiro WireGuard ou OpenVPN;
+* uma identidade Tailscale e um hostname próprio;
+* uma interface VPN e uma tabela de routing isoladas.
+
+Depois de reiniciar o bridge, os perfis aparecem na aplicação Tailscale como exit nodes separados, por exemplo `protonvpn-portugal` e `protonvpn-netherlands`. A escolha do exit node é feita no dispositivo Tailscale do utilizador. A Web UI gere os perfis e mostra o estado de cada um.
+
+Na Web UI, use **Add profile**, carregue o ficheiro descarregado da Proton e indique uma auth key reutilizável do Tailscale. Grave e aplique a configuração com:
+
+```bash
+docker compose up -d --build vpn-tailscale-bridge webui
+```
+
+Os perfis ficam em `./vpn/profiles/<id>/`. Cada perfil cria um dispositivo Tailscale separado, por isso conta para o limite de dispositivos da sua Tailnet. O modo multi-localização é ativado por defeito; defina `MULTI_PROFILE_ENABLED=0` para continuar a usar apenas a configuração legacy.
+
+Quando existe pelo menos um perfil válido, os valores legacy em `./vpn/wireguard`, `./vpn/openvpn` e no `.env` deixam de ser usados pelo bridge.
+O dashboard também mostra o número de dispositivos com sessões encaminhadas ativas através do exit node. A contagem vem da tabela de connection tracking do bridge. Por isso, representa dispositivos observados recentemente no plano de dados, não todos os dispositivos que escolheram o exit node mas estão sem tráfego.
+
 ### Configurar o updater
 
 O updater é um serviço separado. Apenas ele tem acesso ao Docker socket; a Web UI comunica através de `./updater/state`. Em Linux/Synology, defina no `.env` o caminho absoluto do projeto no anfitrião:

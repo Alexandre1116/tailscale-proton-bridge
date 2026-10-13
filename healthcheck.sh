@@ -1,6 +1,11 @@
 #!/bin/sh
 set -eu
 
+if grep -q '"mode":"multi"' /var/run/bridge-status/status.json 2>/dev/null; then
+    grep -q '"connected":true' /var/run/bridge-status/status.json
+    exit 0
+fi
+
 tailscale status >/dev/null 2>&1
 grep -q '\"connected\": true' /var/run/bridge-status/status.json
 

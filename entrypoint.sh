@@ -73,6 +73,16 @@ configure_forwarding() {
 
 configure_forwarding
 
+# When the Web UI has created profiles, run the multi-exit-node supervisor.
+# Without profiles, keep the legacy single-profile mode.
+if [ "${MULTI_PROFILE_ENABLED:-1}" != "0" ]; then
+    for profile_metadata in /etc/bridge-profiles/*/profile.env; do
+        if [ -f "$profile_metadata" ]; then
+            exec /multi-entrypoint.sh
+        fi
+    done
+fi
+
 # Função de limpeza para encerramento gracioso
 cleanup() {
     echo "Sinal de paragem recebido. A encerrar serviços..."

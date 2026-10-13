@@ -8,6 +8,8 @@ vpn/wireguard/*
 !vpn/wireguard/.gitkeep
 vpn/openvpn/*
 !vpn/openvpn/.gitkeep
+vpn/profiles/*
+!vpn/profiles/.gitkeep
 *.conf
 *.ovpn
 credentials.txt
