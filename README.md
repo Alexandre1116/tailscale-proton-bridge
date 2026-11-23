@@ -218,13 +218,17 @@ design). They are not tunnel failures.
 
 The bridge writes the Proton tunnel's DNS servers and fallback resolvers
 (`DNS_FALLBACK_SERVERS`, default `1.1.1.1 9.9.9.9`) into the container's
-`/etc/resolv.conf`, with short resolver timeouts. The fallbacks only kick in
-when the tunnel's resolver stops answering, and they still leave through the
-VPN tunnel; they exist because a Proton DNS outage would otherwise fail the
-bridge's own probes and restart the container in a loop. Health probes try
-every URL in `VPN_HEALTHCHECK_URLS` (`VPN_HEALTHCHECK_URL` plus
-`checkip.amazonaws.com` and `ifconfig.me` by default) before counting one
-failure.
+`/etc/resolv.conf`. Alpine's musl resolver queries all listed servers in
+parallel, so a fallback answers as soon as the tunnel's resolver stops
+replying. Those fallbacks only ever carry the bridge's own lookups (health
+checks, tailscale's control-plane names) and still leave through the VPN
+tunnel; your Tailnet devices use whichever resolver they configure. The
+fallbacks exist because a Proton DNS outage would otherwise fail the bridge's
+own probes and restart the container in a loop. Health probes try every URL
+in `VPN_HEALTHCHECK_URLS` (your `VPN_HEALTHCHECK_URL` plus
+`checkip.amazonaws.com` and `ifconfig.me` by default, even when you set a
+custom URL) before counting one failure. The Docker healthcheck caps each
+probe at 6s so all URLs are tried inside its 20s budget.
 
 ### Direct Tailscale connections
 

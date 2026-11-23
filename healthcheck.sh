@@ -2,14 +2,17 @@
 set -eu
 
 # Same probe list the entrypoints use: one overloaded endpoint must not make
-# the container look unhealthy while the tunnel is fine.
+# the container look unhealthy while the tunnel is fine. The per-probe budget
+# is deliberately below Docker's healthcheck timeout so every URL is tried
+# before Docker gives up on the script.
 VPN_HEALTHCHECK_URLS="${VPN_HEALTHCHECK_URLS:-${VPN_HEALTHCHECK_URL:-https://api.ipify.org} https://checkip.amazonaws.com https://ifconfig.me/ip}"
+PROBE_TIMEOUT_SECONDS="${PROBE_TIMEOUT_SECONDS:-6}"
 
 probe_via() {
     interface="$1"
     for url in $VPN_HEALTHCHECK_URLS; do
-        if curl --interface "$interface" --fail --silent --show-error --max-time 10 \
-            "$url" >/dev/null; then
+        if curl --interface "$interface" --fail --silent --show-error \
+            --max-time "$PROBE_TIMEOUT_SECONDS" "$url" >/dev/null; then
             return 0
         fi
     done

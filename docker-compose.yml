@@ -76,7 +76,9 @@ services:
     healthcheck:
       test: ["CMD", "/healthcheck.sh"]
       interval: 30s
-      timeout: 10s
+      # Must cover the whole probe list (3 URLs x 6s), otherwise Docker kills
+      # the script before it can try the fallback endpoints.
+      timeout: 20s
       retries: 3
       start_period: 25s
 

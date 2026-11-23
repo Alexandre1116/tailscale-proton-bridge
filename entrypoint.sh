@@ -395,11 +395,12 @@ if [ "$VPN_MODE" = "wireguard" ]; then
     # Em Docker-in-LXC, o namespace pode impedir a escrita de
     # net.ipv4.conf.all.src_valid_mark. Nesse caso, o routing automático do
     # wg-quick falha; usamos Table=off e instalamos as rotas equivalentes.
-    # O valor já pode vir a 1 dos sysctls do compose mesmo com /proc/sys em
-    # leitura; só usamos o routing manual quando o valor não é nem fica 1.
+    # Não testamos aqui se o valor já vem a 1 dos sysctls do compose: o modo
+    # manual é o caminho validado em LXC e evitar o routing automático do
+    # wg-quick (regras fwmark + suppress_prefixlength, regras nft raw) mantém
+    # o arranque no percurso que conhecemos.
     WG_MANUAL_ROUTING="0"
-    SRC_VALID_MARK=$(sysctl -n net.ipv4.conf.all.src_valid_mark 2>/dev/null || echo 0)
-    if [ "$SRC_VALID_MARK" != "1" ] && ! sysctl -q net.ipv4.conf.all.src_valid_mark=1 2>/dev/null; then
+    if ! sysctl -q net.ipv4.conf.all.src_valid_mark=1 2>/dev/null; then
         WG_ENDPOINT=$(awk -F= '/^[[:space:]]*Endpoint[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' "$WG_RUNNING_CONF")
         WG_ENDPOINT_IP="${WG_ENDPOINT%:*}"
         WG_DEFAULT_ROUTE=$(ip route show default | awk '$1 == "default" {print $3, $5; exit}')
@@ -426,23 +427,19 @@ if [ "$VPN_MODE" = "wireguard" ]; then
     fi
 
     # Aplicar DNS do túnel VPN diretamente a /etc/resolv.conf sem quebrar o bind mount.
-    # O timeout curto faz o resolvidor saltar para os servidores de reserva quando o
-    # DNS do túnel não responde; sem isso, uma falha de DNS da Proton consome todo o
-    # tempo do curl nos testes de saúde e reinicia o container em loop.
-    if [ -n "$DNS_SERVERS" ]; then
+    # A Alpine usa musl, que consulta os nameservers em paralelo; os servidores de
+    # reserva respondem assim que o DNS do túnel deixa de responder, evitando que o
+    # curl dos testes de saúde esgote o tempo limite e reinicie o container em loop.
+    if [ -n "$DNS_SERVERS" ] || [ -n "$DNS_FALLBACK_SERVERS" ]; then
         echo "A configurar DNS do túnel VPN..."
         {
             echo "options timeout:2 attempts:2"
-            for dns in $DNS_SERVERS; do
+            for dns in $DNS_SERVERS $DNS_FALLBACK_SERVERS; do
                 dns=$(echo "$dns" | tr -d ' ')
                 [ -n "$dns" ] || continue
                 if [ "$IPV6_DISABLED" != "1" ] || [ "${dns#*:}" = "$dns" ]; then
                     echo "nameserver $dns"
                 fi
-            done
-            for dns in $DNS_FALLBACK_SERVERS; do
-                dns=$(echo "$dns" | tr -d ' ')
-                [ -n "$dns" ] && echo "nameserver $dns"
             done
         } > /etc/resolv.conf 2>/dev/null || true
     fi

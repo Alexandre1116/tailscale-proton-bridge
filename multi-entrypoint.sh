@@ -20,6 +20,7 @@ mkdir -p "$STATUS_DIR" /var/lib/tailscale /var/run/tailscale /tmp
 declare -a PROFILE_IDS PROFILE_NAMES PROFILE_TYPES PROFILE_HOSTNAMES PROFILE_EXTRAS
 declare -a VPN_INTERFACES TS_INTERFACES TS_SOCKETS TS_PIDS VPN_PIDS
 declare -a PROFILE_STATES PROFILE_AUTH_URLS PROFILE_FAILURES PROFILE_TABLES PROFILE_UP_PIDS PROFILE_FIREWALL_CONFIGURED
+declare -a PROFILE_PROBE_IPS
 PROFILE_COUNT=0
 TELEMETRY_PID=""
 
@@ -152,9 +153,11 @@ read_secret() {
 }
 
 vpn_probe() {
-    local interface="$1" url
+    local ip="$1" iface="$2" url
+    # IP%iface binds the source address and pins the device, so the probe can
+    # only succeed if this profile's tunnel actually forwards the traffic.
     for url in $VPN_HEALTHCHECK_URLS; do
-        if curl --interface "$interface" --fail --silent --show-error \
+        if curl --interface "${ip}%${iface}" --fail --silent --show-error \
             --max-time 10 "$url" >/dev/null 2>&1; then
             return 0
         fi
@@ -254,20 +257,37 @@ activate_profile() {
     local ts_if="${TS_INTERFACES[$i]}"
     local vpn_if="${VPN_INTERFACES[$i]}"
     local table="${PROFILE_TABLES[$i]}"
-    local tunnel_ip=""
 
     ip route replace "100.64.0.0/10" dev "$ts_if" table "$table"
     ip route replace default dev "$vpn_if" table "$table"
     ip rule add iif "$ts_if" table "$table" pref "$((1000 + i))" 2>/dev/null || true
     ip rule add fwmark "$table" table "$table" pref "$((2000 + i))" 2>/dev/null || true
-    # As sondas de saúde do próprio container ligam-se ao endereço do túnel.
-    # Sem esta regra sairiam pelo eth0 e o teste nunca validaria o túnel.
-    tunnel_ip=$(ip -4 -o addr show dev "$vpn_if" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)
-    if [ -n "$tunnel_ip" ]; then
-        ip rule add from "$tunnel_ip" table "$table" pref "$((3000 + i))" 2>/dev/null || true
-    fi
     PROFILE_STATES[$i]="connected"
     PROFILE_AUTH_URLS[$i]=""
+
+    # Give the container's own probe (source IP pinned to the tunnel address)
+    # a route through this profile's table. Proton hands every WireGuard
+    # profile the same address, so later profiles that would share a rule get
+    # no probe rule and skip the HTTP check instead of riding another
+    # profile's tunnel.
+    local probe_ip="" probe_shared=false j
+    probe_ip=$(ip -4 -o addr show dev "$vpn_if" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)
+    PROFILE_PROBE_IPS[$i]=""
+    if [ -n "$probe_ip" ]; then
+        for ((j = 0; j < i; j++)); do
+            if [ "${PROFILE_PROBE_IPS[j]:-}" = "$probe_ip" ]; then
+                probe_shared=true
+                break
+            fi
+        done
+        if [ "$probe_shared" = true ]; then
+            echo "Profile ${PROFILE_IDS[$i]}: tunnel address $probe_ip is not unique; the HTTP probe cannot distinguish profiles" >&2
+        elif ! ip rule add from "$probe_ip" table "$table" pref "$((3000 + i))"; then
+            echo "Profile ${PROFILE_IDS[$i]}: could not install the probe route; the HTTP probe is disabled for this profile" >&2
+        else
+            PROFILE_PROBE_IPS[$i]="$probe_ip"
+        fi
+    fi
 }
 
 configure_profile_firewall() {
@@ -498,7 +518,7 @@ while true; do
         if ! kill -0 "${TS_PIDS[$i]}" 2>/dev/null || \
            { [ "${PROFILE_TYPES[$i]}" = openvpn ] && ! kill -0 "${VPN_PIDS[$i]}" 2>/dev/null; } || \
            ! ip addr show dev "${VPN_INTERFACES[$i]}" 2>/dev/null | grep -q 'inet ' || \
-           ! vpn_probe "${VPN_INTERFACES[$i]}"; then
+           { [ -n "${PROFILE_PROBE_IPS[$i]:-}" ] && ! vpn_probe "${PROFILE_PROBE_IPS[$i]}" "${VPN_INTERFACES[$i]}"; }; then
             PROFILE_FAILURES[$i]=$((PROFILE_FAILURES[$i] + 1))
             PROFILE_STATES[$i]="degraded"
             if [ "${PROFILE_FAILURES[$i]}" -ge "$VPN_FAILURE_THRESHOLD" ]; then
