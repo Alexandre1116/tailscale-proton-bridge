@@ -13,6 +13,16 @@ VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
 # Lista de URLs (separados por espaços) testada antes de declarar um perfil em falha.
 VPN_HEALTHCHECK_URLS="${VPN_HEALTHCHECK_URLS:-${VPN_HEALTHCHECK_URL} https://checkip.amazonaws.com https://ifconfig.me/ip}"
+# Orçamento repartido pelas URLs: com vários perfis, o ciclo de monitorização
+# não pode ficar 10s por sonda x URLs x perfis.
+probe_budget=${HEALTHCHECK_BUDGET_SECONDS:-18}
+probe_url_count=0
+for _probe_url in $VPN_HEALTHCHECK_URLS; do
+    probe_url_count=$((probe_url_count + 1))
+done
+[ "$probe_url_count" -gt 0 ] || probe_url_count=1
+probe_max_time=$((probe_budget / probe_url_count))
+[ "$probe_max_time" -ge 2 ] || probe_max_time=2
 STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
 
 mkdir -p "$STATUS_DIR" /var/lib/tailscale /var/run/tailscale /tmp
@@ -158,7 +168,7 @@ vpn_probe() {
     # only succeed if this profile's tunnel actually forwards the traffic.
     for url in $VPN_HEALTHCHECK_URLS; do
         if curl --interface "${ip}%${iface}" --fail --silent --show-error \
-            --max-time 10 "$url" >/dev/null 2>&1; then
+            --max-time "$probe_max_time" "$url" >/dev/null 2>&1; then
             return 0
         fi
     done

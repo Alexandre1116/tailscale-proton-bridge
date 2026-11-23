@@ -78,8 +78,8 @@ services:
     healthcheck:
       test: ["CMD", "/healthcheck.sh"]
       interval: 30s
-      # Must cover the whole probe list (3 URLs x 6s), otherwise Docker kills
-      # the script before it can try the fallback endpoints.
+      # Must exceed HEALTHCHECK_BUDGET_SECONDS (default 18s), which the
+      # script splits across the configured probe URLs.
       timeout: 20s
       retries: 3
       start_period: 25s
