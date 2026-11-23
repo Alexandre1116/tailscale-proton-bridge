@@ -84,7 +84,7 @@ def test_multi_profile_kill_switch_precedes_exit_node_advertisement():
 def test_container_dns_has_fallback_resolvers_and_short_timeouts():
     entrypoint = (PROJECT_ROOT / "entrypoint.sh").read_text(encoding="utf-8")
 
-    assert 'DNS_FALLBACK_SERVERS="${DNS_FALLBACK_SERVERS:-1.1.1.1 9.9.9.9}"' in entrypoint
+    assert 'DNS_FALLBACK_SERVERS="${DNS_FALLBACK_SERVERS-1.1.1.1 9.9.9.9}"' in entrypoint
     assert '"options timeout:2 attempts:2"' in entrypoint
     assert "for dns in $DNS_SERVERS $DNS_FALLBACK_SERVERS" in entrypoint
     # IPv6 resolvers (tunnel or fallback) would hang when IPv6 is disabled.
@@ -111,6 +111,9 @@ def test_multi_profile_local_probes_are_pinned_to_their_tunnel():
     # IP%iface binds the source address and pins the device, so a probe can
     # only succeed over the profile's own tunnel.
     assert 'curl --interface "${ip}%${iface}"' in supervisor
+    # Verified on the shipped image (Alpine 3.23, curl 8.22.0/musl):
+    # --interface <IPv4>%<iface> binds address+device and returns rc=0,
+    # while a device-only --interface %<iface> fails with curl (45).
     assert 'vpn_probe "${PROFILE_PROBE_IPS[$i]}" "${VPN_INTERFACES[$i]}"' in supervisor
     # Proton repeats the same tunnel address for every profile, so the probe
     # route is keyed by output interface, not by source address.

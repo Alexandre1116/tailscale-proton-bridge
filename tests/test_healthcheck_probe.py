@@ -50,10 +50,12 @@ def test_compose_healthcheck_timeout_covers_the_probe_budget():
     compose = (PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     probe = (PROJECT_ROOT / "healthcheck.sh").read_text(encoding="utf-8")
 
-    probe_seconds = int(regex.search(r"PROBE_TIMEOUT_SECONDS:-([0-9]+)", probe).group(1))
+    budget = int(regex.search(r"HEALTHCHECK_BUDGET_SECONDS:-([0-9]+)", probe).group(1))
     default_urls = len(regex.findall(r"https://[^\s\"}]+", probe))
     bridge = compose[compose.index("\n  vpn-tailscale-bridge:"):compose.index("\n  webui:")]
     timeout_seconds = int(regex.search(r"healthcheck:.*?timeout: ([0-9]+)s", bridge, regex.S).group(1))
 
     assert default_urls >= 3
-    assert timeout_seconds >= probe_seconds * default_urls
+    # The script splits the budget across every configured URL, so the
+    # invariant to hold is budget < Docker's timeout.
+    assert budget + 2 <= timeout_seconds

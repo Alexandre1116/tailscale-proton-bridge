@@ -13,7 +13,8 @@ STATUS_WRITER_PID=""
 STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
 # Resolvidores usados quando o DNS do túnel não responde. Continuam a sair
 # pelo túnel VPN; servem apenas para os pedidos do próprio container bridge.
-DNS_FALLBACK_SERVERS="${DNS_FALLBACK_SERVERS:-1.1.1.1 9.9.9.9}"
+# Padrão apenas quando a variável está ausente: uma lista vazia desativa.
+DNS_FALLBACK_SERVERS="${DNS_FALLBACK_SERVERS-1.1.1.1 9.9.9.9}"
 
 # Validate this before starting VPN or Tailscale services. The upper bound
 # keeps the value safe for browser timers (which use signed 32-bit delays).
