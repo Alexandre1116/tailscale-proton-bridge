@@ -79,3 +79,69 @@ def test_multi_profile_kill_switch_precedes_exit_node_advertisement():
 
     assert supervisor.index("iptables -P FORWARD DROP") < supervisor.index(advertise_exit_node)
     assert supervisor.index("ip6tables -P FORWARD DROP") < supervisor.index(advertise_exit_node)
+
+
+def test_container_dns_has_fallback_resolvers_and_short_timeouts():
+    entrypoint = (PROJECT_ROOT / "entrypoint.sh").read_text(encoding="utf-8")
+
+    assert 'DNS_FALLBACK_SERVERS="${DNS_FALLBACK_SERVERS-1.1.1.1 9.9.9.9}"' in entrypoint
+    assert '"options timeout:2 attempts:2"' in entrypoint
+    assert "for dns in $1 $DNS_FALLBACK_SERVERS" in entrypoint
+    # IPv6 resolvers (tunnel or fallback) would hang when IPv6 is disabled.
+    assert 'if [ "$IPV6_DISABLED" != "1" ] || [ "${dns#*:}" = "$dns" ]' in entrypoint
+    # musl and c-ares ignore anything past the third nameserver.
+    assert 'if [ "$resolver_count" -ge 3 ]; then' in entrypoint
+    assert 'write_resolv_conf "$DNS_SERVERS"' in entrypoint
+
+
+def test_openvpn_mode_also_gets_dns_fallback_resolvers():
+    entrypoint = (PROJECT_ROOT / "entrypoint.sh").read_text(encoding="utf-8")
+
+    # A frozen pushed resolver or Docker's embedded DNS would crash-loop the
+    # OpenVPN bridge exactly like the WireGuard one; append fallbacks.
+    assert "current_servers=$(awk '/^[[:space:]]*nameserver/ {print $2}' /etc/resolv.conf" in entrypoint
+    assert 'write_resolv_conf "$current_servers"' in entrypoint
+    # Keep the resolvers already configured, fallbacks go last.
+    assert entrypoint.index('current_servers=$(awk') < entrypoint.index('write_resolv_conf "$current_servers"')
+
+
+def test_monitor_probes_split_the_budget_across_urls():
+    entrypoint = (PROJECT_ROOT / "entrypoint.sh").read_text(encoding="utf-8")
+    supervisor = (PROJECT_ROOT / "multi-entrypoint.sh").read_text(encoding="utf-8")
+
+    for script in (entrypoint, supervisor):
+        assert 'probe_budget=${HEALTHCHECK_BUDGET_SECONDS:-18}' in script
+        assert 'probe_max_time=$((probe_budget / probe_url_count))' in script
+        assert '--max-time "$probe_max_time"' in script
+
+
+def test_vpn_health_probes_try_several_urls_in_both_entrypoints():
+    entrypoint = (PROJECT_ROOT / "entrypoint.sh").read_text(encoding="utf-8")
+    supervisor = (PROJECT_ROOT / "multi-entrypoint.sh").read_text(encoding="utf-8")
+    healthcheck = (PROJECT_ROOT / "healthcheck.sh").read_text(encoding="utf-8")
+
+    for script in (entrypoint, supervisor, healthcheck):
+        assert "VPN_HEALTHCHECK_URLS" in script
+        assert "checkip.amazonaws.com" in script
+    for script in (entrypoint, supervisor):
+        assert "for healthcheck_url in $VPN_HEALTHCHECK_URLS" in script or "for url in $VPN_HEALTHCHECK_URLS" in script
+
+
+def test_multi_profile_local_probes_are_pinned_to_their_tunnel():
+    supervisor = (PROJECT_ROOT / "multi-entrypoint.sh").read_text(encoding="utf-8")
+
+    # IP%iface binds the source address and pins the device, so a probe can
+    # only succeed over the profile's own tunnel.
+    assert 'curl --interface "${ip}%${iface}"' in supervisor
+    # Verified on the shipped image (Alpine 3.23, curl 8.22.0/musl):
+    # --interface <IPv4>%<iface> binds address+device and returns rc=0,
+    # while a device-only --interface %<iface> fails with curl (45).
+    assert 'vpn_probe "${PROFILE_PROBE_IPS[$i]}" "${VPN_INTERFACES[$i]}"' in supervisor
+    # Proton repeats the same tunnel address for every profile, so the probe
+    # route is keyed by output interface, not by source address.
+    assert 'ip rule add oif "$vpn_if" table "$table" pref "$((3000 + i))"' in supervisor
+    assert 'ip rule add from' not in supervisor
+    # The probe route install is verified, and the rule is removed on cleanup.
+    assert "could not install the probe route" in supervisor
+    assert 'ip rule del pref "$((3000 + i))"' in supervisor
+    assert '{ [ -n "${PROFILE_PROBE_IPS[$i]:-}" ] && ! vpn_probe' in supervisor

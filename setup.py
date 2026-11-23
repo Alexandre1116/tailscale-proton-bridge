@@ -191,7 +191,7 @@ VPN_CHECK_INTERVAL=30
 VPN_FAILURE_THRESHOLD=3
 VPN_HEALTHCHECK_URL=https://api.ipify.org
 STATUS_UPDATE_INTERVAL=2
- """
+"""
     with open(".env", "w") as f:
         f.write(env_content)
     try:

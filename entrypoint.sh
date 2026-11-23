@@ -11,6 +11,10 @@ echo "============================================="
 WG_RUNNING_CONF="/tmp/protonvpn.conf"
 STATUS_WRITER_PID=""
 STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
+# Resolvidores usados quando o DNS do túnel não responde. Continuam a sair
+# pelo túnel VPN; servem apenas para os pedidos do próprio container bridge.
+# Padrão apenas quando a variável está ausente: uma lista vazia desativa.
+DNS_FALLBACK_SERVERS="${DNS_FALLBACK_SERVERS-1.1.1.1 9.9.9.9}"
 
 # Validate this before starting VPN or Tailscale services. The upper bound
 # keeps the value safe for browser timers (which use signed 32-bit delays).
@@ -72,6 +76,33 @@ configure_forwarding() {
 }
 
 configure_forwarding
+
+IPV6_DISABLED=$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo "0")
+
+# Escreve /etc/resolv.conf com os resolvidores primários dados seguidos dos
+# de reserva: sem duplicados, com IPv6 filtrado quando desativado e no
+# máximo três (musl e c-ares ignoram um quarto silenciosamente).
+write_resolv_conf() {
+    local resolver_count=0 declared="" dns
+    {
+        echo "options timeout:2 attempts:2"
+        for dns in $1 $DNS_FALLBACK_SERVERS; do
+            dns=$(echo "$dns" | tr -d ' ')
+            [ -n "$dns" ] || continue
+            case " $declared " in
+                *" $dns "*) continue ;;
+            esac
+            if [ "$IPV6_DISABLED" != "1" ] || [ "${dns#*:}" = "$dns" ]; then
+                echo "nameserver $dns"
+                declared="$declared $dns"
+                resolver_count=$((resolver_count + 1))
+                if [ "$resolver_count" -ge 3 ]; then
+                    break
+                fi
+            fi
+        done
+    } > /etc/resolv.conf 2>/dev/null || true
+}
 
 profile_has_vpn_config() {
     local metadata="$1"
@@ -368,7 +399,6 @@ if [ "$VPN_MODE" = "wireguard" ]; then
     
     # Prevenir conflitos do resolvconf com Docker bind-mounts em /etc/resolv.conf
     # Cria uma cópia funcional do ficheiro sem a diretiva DNS do wg-quick
-    IPV6_DISABLED=$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null || echo "0")
     if [ "$IPV6_DISABLED" = "1" ]; then
         sed -E \
             -e 's/^([[:space:]]*Address[[:space:]]*=[^,]+),.*/\1/' \
@@ -390,8 +420,12 @@ if [ "$VPN_MODE" = "wireguard" ]; then
     fi
     
     # Em Docker-in-LXC, o namespace pode impedir a escrita de
-    # net.ipv4.conf.all.src_valid_mark. Nesse caso, o routing automÃ¡tico do
+    # net.ipv4.conf.all.src_valid_mark. Nesse caso, o routing automático do
     # wg-quick falha; usamos Table=off e instalamos as rotas equivalentes.
+    # Não testamos aqui se o valor já vem a 1 dos sysctls do compose: o modo
+    # manual é o caminho validado em LXC e evitar o routing automático do
+    # wg-quick (regras fwmark + suppress_prefixlength, regras nft raw) mantém
+    # o arranque no percurso que conhecemos.
     WG_MANUAL_ROUTING="0"
     if ! sysctl -q net.ipv4.conf.all.src_valid_mark=1 2>/dev/null; then
         WG_ENDPOINT=$(awk -F= '/^[[:space:]]*Endpoint[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' "$WG_RUNNING_CONF")
@@ -400,7 +434,7 @@ if [ "$VPN_MODE" = "wireguard" ]; then
         WG_DEFAULT_GATEWAY=${WG_DEFAULT_ROUTE%% *}
         WG_DEFAULT_DEVICE=${WG_DEFAULT_ROUTE#* }
         if [ -z "$WG_ENDPOINT_IP" ] || [ -z "$WG_DEFAULT_GATEWAY" ] || [ -z "$WG_DEFAULT_DEVICE" ]; then
-            echo "Erro: nÃ£o foi possÃ­vel determinar a rota original para o endpoint WireGuard."
+            echo "Erro: não foi possível determinar a rota original para o endpoint WireGuard."
             exit 1
         fi
         sed '/^\[Interface\]$/a Table = off' "$WG_RUNNING_CONF" > /tmp/protonvpn.tmp.conf
@@ -419,15 +453,13 @@ if [ "$VPN_MODE" = "wireguard" ]; then
         ip route replace default dev "$VPN_INTERFACE"
     fi
 
-    # Aplicar DNS do túnel VPN diretamente a /etc/resolv.conf sem quebrar o bind mount
-    if [ -n "$DNS_SERVERS" ]; then
+    # Aplicar DNS do túnel VPN diretamente a /etc/resolv.conf sem quebrar o bind mount.
+    # A Alpine usa musl, que consulta os nameservers em paralelo; os servidores de
+    # reserva respondem assim que o DNS do túnel deixa de responder, evitando que o
+    # curl dos testes de saúde esgote o tempo limite e reinicie o container em loop.
+    if [ -n "$DNS_SERVERS" ] || [ -n "$DNS_FALLBACK_SERVERS" ]; then
         echo "A configurar DNS do túnel VPN..."
-        {
-            for dns in $DNS_SERVERS; do
-                dns=$(echo "$dns" | tr -d ' ')
-                [ -n "$dns" ] && echo "nameserver $dns"
-            done
-        } > /etc/resolv.conf 2>/dev/null || true
+        write_resolv_conf "$DNS_SERVERS"
     fi
 
 elif [ "$VPN_MODE" = "openvpn" ]; then
@@ -455,6 +487,15 @@ elif [ "$VPN_MODE" = "openvpn" ]; then
         fi
         sleep 1
     done
+
+    # O DNS empurrado pelo OpenVPN (ou o DNS embutido do Docker) pode gelar
+    # como o resolvidor do túnel WireGuard. Mantemos os resolvidores já
+    # configurados e acrescentamos os de reserva para as sondas não falharem.
+    if [ -n "$DNS_FALLBACK_SERVERS" ] && [ -r /etc/resolv.conf ]; then
+        echo "A configurar DNS de reserva do túnel VPN..."
+        current_servers=$(awk '/^[[:space:]]*nameserver/ {print $2}' /etc/resolv.conf | tr '\n' ' ')
+        write_resolv_conf "$current_servers"
+    fi
 fi
 
 # Validar se a interface VPN obteve IP com sucesso
@@ -571,6 +612,19 @@ echo "=========================================================="
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
 VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
+# Lista de URLs (separados por espaços) testada antes de declarar a VPN em falha.
+# Um único endpoint pode falhar por sobrecarga sem que a VPN esteja em baixo.
+VPN_HEALTHCHECK_URLS="${VPN_HEALTHCHECK_URLS:-${VPN_HEALTHCHECK_URL} https://checkip.amazonaws.com https://ifconfig.me/ip}"
+# Orçamento repartido pelas URLs para que o ciclo de monitorização nunca
+# fique bloqueado mais tempo do que o VPN_CHECK_INTERVAL em sondas paradas.
+probe_budget=${HEALTHCHECK_BUDGET_SECONDS:-18}
+probe_url_count=0
+for _probe_url in $VPN_HEALTHCHECK_URLS; do
+    probe_url_count=$((probe_url_count + 1))
+done
+[ "$probe_url_count" -gt 0 ] || probe_url_count=1
+probe_max_time=$((probe_budget / probe_url_count))
+[ "$probe_max_time" -ge 2 ] || probe_max_time=2
 write_status "true"
 vpn_failures=0
 
@@ -587,8 +641,14 @@ STATUS_WRITER_PID=$!
 check_vpn_connectivity() {
     tailscale status >/dev/null 2>&1 || return 1
     ip addr show dev "$VPN_INTERFACE" 2>/dev/null | grep -q "inet " || return 1
-    curl --interface "$VPN_INTERFACE" --fail --silent --show-error \
-        --max-time 10 "$VPN_HEALTHCHECK_URL" >/dev/null
+    local healthcheck_url
+    for healthcheck_url in $VPN_HEALTHCHECK_URLS; do
+        if curl --interface "$VPN_INTERFACE" --fail --silent --show-error \
+            --max-time "$probe_max_time" "$healthcheck_url" >/dev/null; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 while true; do

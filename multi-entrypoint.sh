@@ -11,6 +11,18 @@ TRAFFIC_FILE="$STATUS_DIR/traffic.json"
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
 VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
+# Lista de URLs (separados por espaços) testada antes de declarar um perfil em falha.
+VPN_HEALTHCHECK_URLS="${VPN_HEALTHCHECK_URLS:-${VPN_HEALTHCHECK_URL} https://checkip.amazonaws.com https://ifconfig.me/ip}"
+# Orçamento repartido pelas URLs: com vários perfis, o ciclo de monitorização
+# não pode ficar 10s por sonda x URLs x perfis.
+probe_budget=${HEALTHCHECK_BUDGET_SECONDS:-18}
+probe_url_count=0
+for _probe_url in $VPN_HEALTHCHECK_URLS; do
+    probe_url_count=$((probe_url_count + 1))
+done
+[ "$probe_url_count" -gt 0 ] || probe_url_count=1
+probe_max_time=$((probe_budget / probe_url_count))
+[ "$probe_max_time" -ge 2 ] || probe_max_time=2
 STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
 
 mkdir -p "$STATUS_DIR" /var/lib/tailscale /var/run/tailscale /tmp
@@ -18,6 +30,7 @@ mkdir -p "$STATUS_DIR" /var/lib/tailscale /var/run/tailscale /tmp
 declare -a PROFILE_IDS PROFILE_NAMES PROFILE_TYPES PROFILE_HOSTNAMES PROFILE_EXTRAS
 declare -a VPN_INTERFACES TS_INTERFACES TS_SOCKETS TS_PIDS VPN_PIDS
 declare -a PROFILE_STATES PROFILE_AUTH_URLS PROFILE_FAILURES PROFILE_TABLES PROFILE_UP_PIDS PROFILE_FIREWALL_CONFIGURED
+declare -a PROFILE_PROBE_IPS
 PROFILE_COUNT=0
 TELEMETRY_PID=""
 
@@ -149,6 +162,19 @@ read_secret() {
     [ -r "$path" ] && tr -d '\r\n' < "$path" || true
 }
 
+vpn_probe() {
+    local ip="$1" iface="$2" url
+    # IP%iface binds the source address and pins the device, so the probe can
+    # only succeed if this profile's tunnel actually forwards the traffic.
+    for url in $VPN_HEALTHCHECK_URLS; do
+        if curl --interface "${ip}%${iface}" --fail --silent --show-error \
+            --max-time "$probe_max_time" "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 profile_mode() {
     local value="$1" directory="$2"
     value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
@@ -180,6 +206,7 @@ cleanup() {
         fi
         ip rule del pref "$((1000 + i))" 2>/dev/null || true
         ip rule del fwmark "${PROFILE_TABLES[$i]}" pref "$((2000 + i))" 2>/dev/null || true
+        ip rule del pref "$((3000 + i))" 2>/dev/null || true
     done
     iptables -F FORWARD 2>/dev/null || true
     iptables -t nat -F POSTROUTING 2>/dev/null || true
@@ -247,6 +274,22 @@ activate_profile() {
     ip rule add fwmark "$table" table "$table" pref "$((2000 + i))" 2>/dev/null || true
     PROFILE_STATES[$i]="connected"
     PROFILE_AUTH_URLS[$i]=""
+
+    # Give the container's own probe a route through this profile's table.
+    # Proton repeats the same tunnel address (10.2.0.2) for every profile, so
+    # a source-address rule cannot tell profiles apart. The probe binds its
+    # source address AND the device (curl IP%iface), and an oif-keyed rule
+    # matches exactly the flows pinned to that interface.
+    local probe_ip=""
+    probe_ip=$(ip -4 -o addr show dev "$vpn_if" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)
+    PROFILE_PROBE_IPS[$i]=""
+    if [ -z "$probe_ip" ]; then
+        echo "Profile ${PROFILE_IDS[$i]}: no tunnel address found; the HTTP probe is disabled for this profile" >&2
+    elif ! ip rule add oif "$vpn_if" table "$table" pref "$((3000 + i))"; then
+        echo "Profile ${PROFILE_IDS[$i]}: could not install the probe route; the HTTP probe is disabled for this profile" >&2
+    else
+        PROFILE_PROBE_IPS[$i]="$probe_ip"
+    fi
 }
 
 configure_profile_firewall() {
@@ -477,7 +520,7 @@ while true; do
         if ! kill -0 "${TS_PIDS[$i]}" 2>/dev/null || \
            { [ "${PROFILE_TYPES[$i]}" = openvpn ] && ! kill -0 "${VPN_PIDS[$i]}" 2>/dev/null; } || \
            ! ip addr show dev "${VPN_INTERFACES[$i]}" 2>/dev/null | grep -q 'inet ' || \
-           ! curl --interface "${VPN_INTERFACES[$i]}" --fail --silent --show-error --max-time 10 "$VPN_HEALTHCHECK_URL" >/dev/null 2>&1; then
+           { [ -n "${PROFILE_PROBE_IPS[$i]:-}" ] && ! vpn_probe "${PROFILE_PROBE_IPS[$i]}" "${VPN_INTERFACES[$i]}"; }; then
             PROFILE_FAILURES[$i]=$((PROFILE_FAILURES[$i] + 1))
             PROFILE_STATES[$i]="degraded"
             if [ "${PROFILE_FAILURES[$i]}" -ge "$VPN_FAILURE_THRESHOLD" ]; then

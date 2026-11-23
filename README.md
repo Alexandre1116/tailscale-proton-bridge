@@ -207,6 +207,36 @@ If the bridge fails to start under Docker-in-LXC because of AppArmor, set
 `BRIDGE_SECURITY_OPT=apparmor=unconfined` in `.env` instead of editing
 `docker-compose.yml`. Local edits block the updater.
 
+Inside an LXC, `/proc/sys` is read-only for containers and some kernel
+resources are restricted, so tailscaled logs warnings that need no action:
+`failed to enable src_valid_mark` (Compose's `sysctls:` already set the value),
+`failed to force-set UDP ... buffer size` (affects throughput only), and
+`peerapi ... bind: cannot assign requested address` (IPv6 is disabled by
+design). They are not tunnel failures.
+
+### DNS and health probe resilience
+
+In single-profile mode the bridge writes the Proton tunnel's DNS servers and
+fallback resolvers (`DNS_FALLBACK_SERVERS`, default `1.1.1.1 9.9.9.9`, an
+empty value disables them) into the container's `/etc/resolv.conf` (max
+three nameservers; musl and c-ares ignore more). In OpenVPN mode the
+fallbacks are appended to the resolvers already configured. Alpine's musl
+resolver queries all listed servers in parallel, so a fallback answers as
+soon as the tunnel's resolver stops replying. Those fallbacks only ever
+carry the bridge's own lookups (health checks, tailscale's control-plane
+names) and still leave through the VPN tunnel; Cloudflare and Quad9 do see
+those lookups, so set `DNS_FALLBACK_SERVERS` to your own resolvers or an
+empty value to opt out. Your Tailnet devices use whichever resolver they
+configure. The fallbacks exist because a Proton DNS outage would otherwise
+fail the bridge's own probes and restart the container in a loop. Health
+probes try every URL in `VPN_HEALTHCHECK_URLS` (your `VPN_HEALTHCHECK_URL`
+plus `checkip.amazonaws.com` and `ifconfig.me` by default; setting the list
+replaces it entirely) before counting one failure, splitting
+`HEALTHCHECK_BUDGET_SECONDS` (default 18s) across the URLs so neither the
+monitor loop nor the Docker healthcheck (20s timeout) stalls on dead
+endpoints. In multi-profile mode each profile's tunnel is verified instead
+by probing through the profile's own interface.
+
 ### Direct Tailscale connections
 
 By default (`TS_DIRECT_UNDERLAY=1`), only tailscaled's own WireGuard UDP port

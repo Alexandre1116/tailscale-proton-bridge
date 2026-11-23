@@ -62,6 +62,10 @@ services:
       - VPN_CHECK_INTERVAL=${VPN_CHECK_INTERVAL:-30}
       - VPN_FAILURE_THRESHOLD=${VPN_FAILURE_THRESHOLD:-3}
       - VPN_HEALTHCHECK_URL=${VPN_HEALTHCHECK_URL:-https://api.ipify.org}
+      - VPN_HEALTHCHECK_URLS=${VPN_HEALTHCHECK_URLS:-}
+      # Colon-less default: unset gets the public pair, an explicitly empty
+      # value in .env disables the fallback resolvers.
+      - DNS_FALLBACK_SERVERS=${DNS_FALLBACK_SERVERS-1.1.1.1 9.9.9.9}
       - STATUS_UPDATE_INTERVAL=${STATUS_UPDATE_INTERVAL:-2}
       # Argumentos adicionais opcionais para o comando 'tailscale up'
       - TS_EXTRA_ARGS=${TS_EXTRA_ARGS:-}
@@ -74,7 +78,9 @@ services:
     healthcheck:
       test: ["CMD", "/healthcheck.sh"]
       interval: 30s
-      timeout: 10s
+      # Must exceed HEALTHCHECK_BUDGET_SECONDS (default 18s), which the
+      # script splits across the configured probe URLs.
+      timeout: 20s
       retries: 3
       start_period: 25s
 
