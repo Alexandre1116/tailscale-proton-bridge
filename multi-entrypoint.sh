@@ -11,6 +11,8 @@ TRAFFIC_FILE="$STATUS_DIR/traffic.json"
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
 VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
+# Lista de URLs (separados por espaços) testada antes de declarar um perfil em falha.
+VPN_HEALTHCHECK_URLS="${VPN_HEALTHCHECK_URLS:-${VPN_HEALTHCHECK_URL} https://checkip.amazonaws.com https://ifconfig.me/ip}"
 STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
 
 mkdir -p "$STATUS_DIR" /var/lib/tailscale /var/run/tailscale /tmp
@@ -149,6 +151,17 @@ read_secret() {
     [ -r "$path" ] && tr -d '\r\n' < "$path" || true
 }
 
+vpn_probe() {
+    local interface="$1" url
+    for url in $VPN_HEALTHCHECK_URLS; do
+        if curl --interface "$interface" --fail --silent --show-error \
+            --max-time 10 "$url" >/dev/null 2>&1; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 profile_mode() {
     local value="$1" directory="$2"
     value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
@@ -180,6 +193,7 @@ cleanup() {
         fi
         ip rule del pref "$((1000 + i))" 2>/dev/null || true
         ip rule del fwmark "${PROFILE_TABLES[$i]}" pref "$((2000 + i))" 2>/dev/null || true
+        ip rule del pref "$((3000 + i))" 2>/dev/null || true
     done
     iptables -F FORWARD 2>/dev/null || true
     iptables -t nat -F POSTROUTING 2>/dev/null || true
@@ -240,11 +254,18 @@ activate_profile() {
     local ts_if="${TS_INTERFACES[$i]}"
     local vpn_if="${VPN_INTERFACES[$i]}"
     local table="${PROFILE_TABLES[$i]}"
+    local tunnel_ip=""
 
     ip route replace "100.64.0.0/10" dev "$ts_if" table "$table"
     ip route replace default dev "$vpn_if" table "$table"
     ip rule add iif "$ts_if" table "$table" pref "$((1000 + i))" 2>/dev/null || true
     ip rule add fwmark "$table" table "$table" pref "$((2000 + i))" 2>/dev/null || true
+    # As sondas de saúde do próprio container ligam-se ao endereço do túnel.
+    # Sem esta regra sairiam pelo eth0 e o teste nunca validaria o túnel.
+    tunnel_ip=$(ip -4 -o addr show dev "$vpn_if" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)
+    if [ -n "$tunnel_ip" ]; then
+        ip rule add from "$tunnel_ip" table "$table" pref "$((3000 + i))" 2>/dev/null || true
+    fi
     PROFILE_STATES[$i]="connected"
     PROFILE_AUTH_URLS[$i]=""
 }
@@ -477,7 +498,7 @@ while true; do
         if ! kill -0 "${TS_PIDS[$i]}" 2>/dev/null || \
            { [ "${PROFILE_TYPES[$i]}" = openvpn ] && ! kill -0 "${VPN_PIDS[$i]}" 2>/dev/null; } || \
            ! ip addr show dev "${VPN_INTERFACES[$i]}" 2>/dev/null | grep -q 'inet ' || \
-           ! curl --interface "${VPN_INTERFACES[$i]}" --fail --silent --show-error --max-time 10 "$VPN_HEALTHCHECK_URL" >/dev/null 2>&1; then
+           ! vpn_probe "${VPN_INTERFACES[$i]}"; then
             PROFILE_FAILURES[$i]=$((PROFILE_FAILURES[$i] + 1))
             PROFILE_STATES[$i]="degraded"
             if [ "${PROFILE_FAILURES[$i]}" -ge "$VPN_FAILURE_THRESHOLD" ]; then

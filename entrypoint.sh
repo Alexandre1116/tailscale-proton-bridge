@@ -11,6 +11,9 @@ echo "============================================="
 WG_RUNNING_CONF="/tmp/protonvpn.conf"
 STATUS_WRITER_PID=""
 STATUS_UPDATE_INTERVAL="${STATUS_UPDATE_INTERVAL:-2}"
+# Resolvidores usados quando o DNS do túnel não responde. Continuam a sair
+# pelo túnel VPN; servem apenas para os pedidos do próprio container bridge.
+DNS_FALLBACK_SERVERS="${DNS_FALLBACK_SERVERS:-1.1.1.1 9.9.9.9}"
 
 # Validate this before starting VPN or Tailscale services. The upper bound
 # keeps the value safe for browser timers (which use signed 32-bit delays).
@@ -390,17 +393,20 @@ if [ "$VPN_MODE" = "wireguard" ]; then
     fi
     
     # Em Docker-in-LXC, o namespace pode impedir a escrita de
-    # net.ipv4.conf.all.src_valid_mark. Nesse caso, o routing automÃ¡tico do
+    # net.ipv4.conf.all.src_valid_mark. Nesse caso, o routing automático do
     # wg-quick falha; usamos Table=off e instalamos as rotas equivalentes.
+    # O valor já pode vir a 1 dos sysctls do compose mesmo com /proc/sys em
+    # leitura; só usamos o routing manual quando o valor não é nem fica 1.
     WG_MANUAL_ROUTING="0"
-    if ! sysctl -q net.ipv4.conf.all.src_valid_mark=1 2>/dev/null; then
+    SRC_VALID_MARK=$(sysctl -n net.ipv4.conf.all.src_valid_mark 2>/dev/null || echo 0)
+    if [ "$SRC_VALID_MARK" != "1" ] && ! sysctl -q net.ipv4.conf.all.src_valid_mark=1 2>/dev/null; then
         WG_ENDPOINT=$(awk -F= '/^[[:space:]]*Endpoint[[:space:]]*=/{gsub(/[[:space:]]/, "", $2); print $2; exit}' "$WG_RUNNING_CONF")
         WG_ENDPOINT_IP="${WG_ENDPOINT%:*}"
         WG_DEFAULT_ROUTE=$(ip route show default | awk '$1 == "default" {print $3, $5; exit}')
         WG_DEFAULT_GATEWAY=${WG_DEFAULT_ROUTE%% *}
         WG_DEFAULT_DEVICE=${WG_DEFAULT_ROUTE#* }
         if [ -z "$WG_ENDPOINT_IP" ] || [ -z "$WG_DEFAULT_GATEWAY" ] || [ -z "$WG_DEFAULT_DEVICE" ]; then
-            echo "Erro: nÃ£o foi possÃ­vel determinar a rota original para o endpoint WireGuard."
+            echo "Erro: não foi possível determinar a rota original para o endpoint WireGuard."
             exit 1
         fi
         sed '/^\[Interface\]$/a Table = off' "$WG_RUNNING_CONF" > /tmp/protonvpn.tmp.conf
@@ -419,11 +425,22 @@ if [ "$VPN_MODE" = "wireguard" ]; then
         ip route replace default dev "$VPN_INTERFACE"
     fi
 
-    # Aplicar DNS do túnel VPN diretamente a /etc/resolv.conf sem quebrar o bind mount
+    # Aplicar DNS do túnel VPN diretamente a /etc/resolv.conf sem quebrar o bind mount.
+    # O timeout curto faz o resolvidor saltar para os servidores de reserva quando o
+    # DNS do túnel não responde; sem isso, uma falha de DNS da Proton consome todo o
+    # tempo do curl nos testes de saúde e reinicia o container em loop.
     if [ -n "$DNS_SERVERS" ]; then
         echo "A configurar DNS do túnel VPN..."
         {
+            echo "options timeout:2 attempts:2"
             for dns in $DNS_SERVERS; do
+                dns=$(echo "$dns" | tr -d ' ')
+                [ -n "$dns" ] || continue
+                if [ "$IPV6_DISABLED" != "1" ] || [ "${dns#*:}" = "$dns" ]; then
+                    echo "nameserver $dns"
+                fi
+            done
+            for dns in $DNS_FALLBACK_SERVERS; do
                 dns=$(echo "$dns" | tr -d ' ')
                 [ -n "$dns" ] && echo "nameserver $dns"
             done
@@ -571,6 +588,9 @@ echo "=========================================================="
 VPN_CHECK_INTERVAL="${VPN_CHECK_INTERVAL:-30}"
 VPN_FAILURE_THRESHOLD="${VPN_FAILURE_THRESHOLD:-3}"
 VPN_HEALTHCHECK_URL="${VPN_HEALTHCHECK_URL:-https://api.ipify.org}"
+# Lista de URLs (separados por espaços) testada antes de declarar a VPN em falha.
+# Um único endpoint pode falhar por sobrecarga sem que a VPN esteja em baixo.
+VPN_HEALTHCHECK_URLS="${VPN_HEALTHCHECK_URLS:-${VPN_HEALTHCHECK_URL} https://checkip.amazonaws.com https://ifconfig.me/ip}"
 write_status "true"
 vpn_failures=0
 
@@ -587,8 +607,14 @@ STATUS_WRITER_PID=$!
 check_vpn_connectivity() {
     tailscale status >/dev/null 2>&1 || return 1
     ip addr show dev "$VPN_INTERFACE" 2>/dev/null | grep -q "inet " || return 1
-    curl --interface "$VPN_INTERFACE" --fail --silent --show-error \
-        --max-time 10 "$VPN_HEALTHCHECK_URL" >/dev/null
+    local healthcheck_url
+    for healthcheck_url in $VPN_HEALTHCHECK_URLS; do
+        if curl --interface "$VPN_INTERFACE" --fail --silent --show-error \
+            --max-time 10 "$healthcheck_url" >/dev/null; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 while true; do

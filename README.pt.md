@@ -195,6 +195,12 @@ docker compose up -d --build
 
 Se a bridge não arrancar em Docker-in-LXC por causa do AppArmor, defina `BRIDGE_SECURITY_OPT=apparmor=unconfined` no `.env` em vez de editar o `docker-compose.yml`. Alterações locais bloqueiam o updater.
 
+Dentro de um LXC, o `/proc/sys` é só de leitura para os contentores e alguns recursos do kernel estão restringidos, por isso o tailscaled regista avisos que não exigem ação: `failed to enable src_valid_mark` (os `sysctls:` do Compose já definiram o valor), `failed to force-set UDP ... buffer size` (afeta apenas o débito) e `peerapi ... bind: cannot assign requested address` (o IPv6 é desativado por desenho). Não são falhas do túnel.
+
+### Resiliência de DNS e dos testes de saúde
+
+A bridge escreve os servidores DNS do túnel Proton e resolvidores de reserva (`DNS_FALLBACK_SERVERS`, por defeito `1.1.1.1 9.9.9.9`) no `/etc/resolv.conf` do contentor, com timeouts curtos. As entradas de reserva só são usadas quando o resolvidor do túnel deixa de responder e continuam a sair pelo túnel VPN; existem porque uma falha de DNS da Proton fazia as sondas da própria bridge falharem e o contentor reiniciar em loop. Os testes de saúde experimentam todos os URLs de `VPN_HEALTHCHECK_URLS` (`VPN_HEALTHCHECK_URL` mais `checkip.amazonaws.com` e `ifconfig.me` por defeito) antes de contar uma falha.
+
 ### Ligações diretas do Tailscale
 
 Por defeito (`TS_DIRECT_UNDERLAY=1`), apenas a porta UDP WireGuard do próprio tailscaled (`TS_PORT`, por defeito `41641`) sai pela rede local. O tráfego do exit node, o DNS, o plano de controlo e os relays DERP continuam a passar pela Proton VPN. Sem isto, o NAT da Proton obriga todos os peers a usar relays DERP. Os peers podem ver o seu IP público real como endpoint do Tailscale; defina `TS_DIRECT_UNDERLAY=0` se preferir manter tudo dentro do túnel.

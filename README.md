@@ -207,6 +207,25 @@ If the bridge fails to start under Docker-in-LXC because of AppArmor, set
 `BRIDGE_SECURITY_OPT=apparmor=unconfined` in `.env` instead of editing
 `docker-compose.yml`. Local edits block the updater.
 
+Inside an LXC, `/proc/sys` is read-only for containers and some kernel
+resources are restricted, so tailscaled logs warnings that need no action:
+`failed to enable src_valid_mark` (Compose's `sysctls:` already set the value),
+`failed to force-set UDP ... buffer size` (affects throughput only), and
+`peerapi ... bind: cannot assign requested address` (IPv6 is disabled by
+design). They are not tunnel failures.
+
+### DNS and health probe resilience
+
+The bridge writes the Proton tunnel's DNS servers and fallback resolvers
+(`DNS_FALLBACK_SERVERS`, default `1.1.1.1 9.9.9.9`) into the container's
+`/etc/resolv.conf`, with short resolver timeouts. The fallbacks only kick in
+when the tunnel's resolver stops answering, and they still leave through the
+VPN tunnel; they exist because a Proton DNS outage would otherwise fail the
+bridge's own probes and restart the container in a loop. Health probes try
+every URL in `VPN_HEALTHCHECK_URLS` (`VPN_HEALTHCHECK_URL` plus
+`checkip.amazonaws.com` and `ifconfig.me` by default) before counting one
+failure.
+
 ### Direct Tailscale connections
 
 By default (`TS_DIRECT_UNDERLAY=1`), only tailscaled's own WireGuard UDP port
