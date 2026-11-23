@@ -265,28 +265,20 @@ activate_profile() {
     PROFILE_STATES[$i]="connected"
     PROFILE_AUTH_URLS[$i]=""
 
-    # Give the container's own probe (source IP pinned to the tunnel address)
-    # a route through this profile's table. Proton hands every WireGuard
-    # profile the same address, so later profiles that would share a rule get
-    # no probe rule and skip the HTTP check instead of riding another
-    # profile's tunnel.
-    local probe_ip="" probe_shared=false j
+    # Give the container's own probe a route through this profile's table.
+    # Proton repeats the same tunnel address (10.2.0.2) for every profile, so
+    # a source-address rule cannot tell profiles apart. The probe binds its
+    # source address AND the device (curl IP%iface), and an oif-keyed rule
+    # matches exactly the flows pinned to that interface.
+    local probe_ip=""
     probe_ip=$(ip -4 -o addr show dev "$vpn_if" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -n1)
     PROFILE_PROBE_IPS[$i]=""
-    if [ -n "$probe_ip" ]; then
-        for ((j = 0; j < i; j++)); do
-            if [ "${PROFILE_PROBE_IPS[j]:-}" = "$probe_ip" ]; then
-                probe_shared=true
-                break
-            fi
-        done
-        if [ "$probe_shared" = true ]; then
-            echo "Profile ${PROFILE_IDS[$i]}: tunnel address $probe_ip is not unique; the HTTP probe cannot distinguish profiles" >&2
-        elif ! ip rule add from "$probe_ip" table "$table" pref "$((3000 + i))"; then
-            echo "Profile ${PROFILE_IDS[$i]}: could not install the probe route; the HTTP probe is disabled for this profile" >&2
-        else
-            PROFILE_PROBE_IPS[$i]="$probe_ip"
-        fi
+    if [ -z "$probe_ip" ]; then
+        echo "Profile ${PROFILE_IDS[$i]}: no tunnel address found; the HTTP probe is disabled for this profile" >&2
+    elif ! ip rule add oif "$vpn_if" table "$table" pref "$((3000 + i))"; then
+        echo "Profile ${PROFILE_IDS[$i]}: could not install the probe route; the HTTP probe is disabled for this profile" >&2
+    else
+        PROFILE_PROBE_IPS[$i]="$probe_ip"
     fi
 }
 

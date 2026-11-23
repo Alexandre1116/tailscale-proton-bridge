@@ -434,11 +434,23 @@ if [ "$VPN_MODE" = "wireguard" ]; then
         echo "A configurar DNS do túnel VPN..."
         {
             echo "options timeout:2 attempts:2"
+            resolver_count=0
+            declared=""
             for dns in $DNS_SERVERS $DNS_FALLBACK_SERVERS; do
                 dns=$(echo "$dns" | tr -d ' ')
                 [ -n "$dns" ] || continue
+                case " $declared " in
+                    *" $dns "*) continue ;;
+                esac
                 if [ "$IPV6_DISABLED" != "1" ] || [ "${dns#*:}" = "$dns" ]; then
                     echo "nameserver $dns"
+                    declared="$declared $dns"
+                    resolver_count=$((resolver_count + 1))
+                    # musl e c-ares só usam os três primeiros nameservers;
+                    # um quarto seria silenciosamente ignorado.
+                    if [ "$resolver_count" -ge 3 ]; then
+                        break
+                    fi
                 fi
             done
         } > /etc/resolv.conf 2>/dev/null || true

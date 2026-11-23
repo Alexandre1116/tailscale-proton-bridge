@@ -89,6 +89,8 @@ def test_container_dns_has_fallback_resolvers_and_short_timeouts():
     assert "for dns in $DNS_SERVERS $DNS_FALLBACK_SERVERS" in entrypoint
     # IPv6 resolvers (tunnel or fallback) would hang when IPv6 is disabled.
     assert 'if [ "$IPV6_DISABLED" != "1" ] || [ "${dns#*:}" = "$dns" ]' in entrypoint
+    # musl and c-ares ignore anything past the third nameserver.
+    assert 'if [ "$resolver_count" -ge 3 ]; then' in entrypoint
 
 
 def test_vpn_health_probes_try_several_urls_in_both_entrypoints():
@@ -110,10 +112,11 @@ def test_multi_profile_local_probes_are_pinned_to_their_tunnel():
     # only succeed over the profile's own tunnel.
     assert 'curl --interface "${ip}%${iface}"' in supervisor
     assert 'vpn_probe "${PROFILE_PROBE_IPS[$i]}" "${VPN_INTERFACES[$i]}"' in supervisor
+    # Proton repeats the same tunnel address for every profile, so the probe
+    # route is keyed by output interface, not by source address.
+    assert 'ip rule add oif "$vpn_if" table "$table" pref "$((3000 + i))"' in supervisor
+    assert 'ip rule add from' not in supervisor
     # The probe route install is verified, and the rule is removed on cleanup.
-    assert 'elif ! ip rule add from "$probe_ip" table "$table" pref "$((3000 + i))"; then' in supervisor
+    assert "could not install the probe route" in supervisor
     assert 'ip rule del pref "$((3000 + i))"' in supervisor
-    # Proton assigns every WireGuard profile the same tunnel address; a shared
-    # source rule would let one profile's probe ride another profile's tunnel.
-    assert "is not unique" in supervisor
     assert '{ [ -n "${PROFILE_PROBE_IPS[$i]:-}" ] && ! vpn_probe' in supervisor
